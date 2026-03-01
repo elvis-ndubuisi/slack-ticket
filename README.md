@@ -84,7 +84,16 @@ node dist/cli.js setup
 -   **Selective Updates**: Use the `update` command to keep issues "alive" as new information arrives in Slack, rather than creating duplicate issues.
 
 ### Contributing
-We welcome contributions to improve the AI logic and provider support! Please check our internal contribution guidelines for more details. Ensure you have followed the [Setup Guide](doc/setup.md) before starting development.
+We welcome contributions! To streamline our release process, we use [Changesets](https://github.com/changesets/changesets).
+
+**When you submit a PR with a new feature or bug fix:**
+1.  Run `pnpm changeset` locally before committing.
+2.  Follow the interactive prompts to declare a `patch`, `minor`, or `major` bump and write a quick summary of your change.
+3.  Commit the generated `.changeset/*.md` file along with your code.
+
+When your PR merges to `main`, our GitHub Actions CI will automatically parse your changeset, update the `CHANGELOG.md`, increment the version, and publish the new release to npm.
+
+Ensure you have followed the [Setup Guide](doc/setup.md) before starting development.
 
 ---
 
