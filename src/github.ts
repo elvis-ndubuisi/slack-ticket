@@ -1,0 +1,469 @@
+/**
+ * GitHub integration module for slack-ticket.
+ *
+ * Handles:
+ * - Issue creation via REST API
+ * - Label resolution (keyword + severity + component + --labels flag)
+ * - Image attachment via issue comment
+ * - GitHub Project v2 assignment via GraphQL
+ */
+
+import https from 'https';
+import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
+import { CLIError } from './error.js';
+import type { Config, LabelsConfig } from './config.js';
+import type { CreateAIOutput } from './ai.js';
+
+// ─── Types ─────────────────────────────────────────────────────────────────────
+
+export interface CreatedIssue {
+    number: number;
+    url: string;
+    nodeId: string;
+}
+
+export interface LabelResolutionOptions {
+    rawSlackText: string;
+    severity: string;
+    component: string | null;
+    extraLabels: string[];
+    labelsConfig: LabelsConfig;
+}
+
+// ─── HTTP Helpers ──────────────────────────────────────────────────────────────
+
+/**
+ * Internal helper for GitHub REST requests.
+ */
+export async function githubRequest(
+    method: string,
+    path: string,
+    token: string,
+    body?: unknown
+): Promise<{ status: number; data: unknown }> {
+    const payload = body ? JSON.stringify(body) : undefined;
+
+    return new Promise((resolve, reject) => {
+        const req = https.request(
+            {
+                hostname: 'api.github.com',
+                path,
+                method,
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    Accept: 'application/vnd.github+json',
+                    'User-Agent': 'slack-ticket-cli',
+                    'X-GitHub-Api-Version': '2022-11-28',
+                    ...(payload && { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }),
+                },
+            },
+            (res) => {
+                let data = '';
+                res.on('data', (chunk) => (data += chunk));
+                res.on('end', () => {
+                    let parsed: unknown = data;
+                    try { parsed = JSON.parse(data); } catch { /* leave as string */ }
+                    resolve({ status: res.statusCode ?? 0, data: parsed });
+                });
+            }
+        );
+        req.on('error', reject);
+        if (payload) req.write(payload);
+        req.end();
+    });
+}
+
+/**
+ * Internal helper for GitHub GraphQL requests.
+ */
+export async function githubGraphQL(
+    query: string,
+    variables: Record<string, unknown>,
+    token: string
+): Promise<unknown> {
+    const payload = JSON.stringify({ query, variables });
+
+    return new Promise((resolve, reject) => {
+        const req = https.request(
+            {
+                hostname: 'api.github.com',
+                path: '/graphql',
+                method: 'POST',
+                headers: {
+                    Authorization: `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                    'User-Agent': 'slack-ticket-cli',
+                    'Content-Length': Buffer.byteLength(payload),
+                },
+            },
+            (res) => {
+                let data = '';
+                res.on('data', (chunk) => (data += chunk));
+                res.on('end', () => {
+                    try { resolve(JSON.parse(data)); } catch { resolve(data); }
+                });
+            }
+        );
+        req.on('error', reject);
+        req.write(payload);
+        req.end();
+    });
+}
+
+function handleGitHubError(status: number, data: unknown, context: string): void {
+    if (status === 401 || status === 403) {
+        const requiredScopes = 'repo, project';
+        throw new CLIError(`GitHub token lacks permissions for ${context}. Required scopes: ${requiredScopes}.`, 5);
+    }
+    if (status === 404) {
+        throw new CLIError(`GitHub repository not found (${context}). Check 'github.owner' and 'github.defaultRepo' in config.`, 5);
+    }
+    if (status === 429) {
+        const reset = (data as any)?.message ?? 'unknown';
+        throw new CLIError(`GitHub rate limited (${context}). Reset at: ${reset}. Try again later.`, 5);
+    }
+    if (status >= 400) {
+        const msg = (data as any)?.message ?? `HTTP ${status}`;
+        throw new CLIError(`GitHub API error during ${context}: ${msg}`, 5);
+    }
+}
+
+// ─── Label Resolution (PRD §11.2) ─────────────────────────────────────────────
+
+/**
+ * Resolves labels from four independent sources, deduplicates, and returns the list.
+ *
+ * Order:
+ * 1. Keyword match on raw Slack text
+ * 2. Severity map from --severity flag or config default
+ * 3. Component map from --component flag or config default
+ * 4. --labels flag additions
+ */
+export function resolveLabels(opts: LabelResolutionOptions): string[] {
+    const { rawSlackText, severity, component, extraLabels, labelsConfig } = opts;
+    const collected: string[] = [];
+
+    // 1. Keyword matching (case-insensitive, pipe-separated synonyms)
+    for (const [pattern, labels] of Object.entries(labelsConfig.keywords ?? {})) {
+        const regex = new RegExp(pattern, 'i');
+        if (regex.test(rawSlackText)) {
+            collected.push(...labels);
+        }
+    }
+
+    // 2. Severity mapping
+    const severityLabels = labelsConfig.severity?.[severity] ?? [];
+    collected.push(...severityLabels);
+
+    // 3. Component mapping
+    if (component) {
+        const componentLabels = labelsConfig.components?.[component] ?? [];
+        collected.push(...componentLabels);
+    }
+
+    // 4. Extra --labels flag
+    collected.push(...extraLabels);
+
+    // Deduplicate maintaining first-seen order
+    return [...new Set(collected)];
+}
+
+/**
+ * Filters label list to only labels that exist in the GitHub repo.
+ * Skips missing labels with a printed warning (per PRD §11.2).
+ * Never auto-creates labels.
+ */
+export async function filterExistingLabels(
+    labels: string[],
+    owner: string,
+    repo: string,
+    token: string
+): Promise<string[]> {
+    if (labels.length === 0) return [];
+
+    // Fetch all labels in the repo (paginated, up to 100)
+    const { status, data } = await githubRequest(
+        'GET',
+        `/repos/${owner}/${repo}/labels?per_page=100`,
+        token
+    );
+
+    if (status !== 200) {
+        // If we can't fetch labels (e.g. permissions), skip filtering
+        return labels;
+    }
+
+    const repoLabels = new Set(
+        ((data as any[]) ?? []).map((l) => (l.name as string).toLowerCase())
+    );
+
+    const valid: string[] = [];
+    for (const label of labels) {
+        if (repoLabels.has(label.toLowerCase())) {
+            valid.push(label);
+        } else {
+            process.stdout.write(`⚠  Label '${label}' not found in repo. Skipping.\n`);
+        }
+    }
+
+    return valid;
+}
+
+// ─── Issue Creation (PRD §11.1) ───────────────────────────────────────────────
+
+/**
+ * Assembles the full GitHub issue body from AI output + metadata.
+ * Sections with null AI output are omitted (PRD §9.5).
+ */
+export function assembleIssueBody(
+    ai: CreateAIOutput,
+    severity: string,
+    component: string | null,
+    slackUrl: string
+): string {
+    const sections: string[] = [];
+
+    if (ai.summary) sections.push(`## Summary\n${ai.summary}`);
+    if (ai.steps_to_reproduce) sections.push(`## Steps to Reproduce\n${ai.steps_to_reproduce}`);
+    if (ai.expected_behavior) sections.push(`## Expected Behavior\n${ai.expected_behavior}`);
+    if (ai.actual_behavior) sections.push(`## Actual Behavior\n${ai.actual_behavior}`);
+
+    sections.push(`## Severity\n${severity}`);
+    if (component) sections.push(`## Component\n${component}`);
+
+    sections.push(`---\n**Slack Thread:** ${slackUrl}`);
+
+    return sections.join('\n\n');
+}
+
+/**
+ * Creates a GitHub issue via REST API.
+ */
+export async function createIssue(
+    owner: string,
+    repo: string,
+    title: string,
+    body: string,
+    labels: string[],
+    token: string
+): Promise<CreatedIssue> {
+    const { status, data } = await githubRequest(
+        'POST',
+        `/repos/${owner}/${repo}/issues`,
+        token,
+        { title, body, labels }
+    );
+
+    handleGitHubError(status, data, 'issue creation');
+
+    const issue = data as any;
+    return {
+        number: issue.number,
+        url: issue.html_url,
+        nodeId: issue.node_id,
+    };
+}
+
+/**
+ * Fetches the body of an existing issue (for `update`).
+ */
+export async function fetchIssueBody(
+    owner: string,
+    repo: string,
+    issueNumber: number,
+    token: string
+): Promise<string> {
+    const { status, data } = await githubRequest(
+        'GET',
+        `/repos/${owner}/${repo}/issues/${issueNumber}`,
+        token
+    );
+
+    handleGitHubError(status, data, `issue #${issueNumber} fetch`);
+    return (data as any).body ?? '';
+}
+
+/**
+ * Appends text to an existing issue body.
+ */
+export async function appendToIssueBody(
+    owner: string,
+    repo: string,
+    issueNumber: number,
+    appendText: string,
+    currentBody: string,
+    token: string
+): Promise<string> {
+    const newBody = `${currentBody}\n\n---\n\n${appendText}`;
+    const { status, data } = await githubRequest(
+        'PATCH',
+        `/repos/${owner}/${repo}/issues/${issueNumber}`,
+        token,
+        { body: newBody }
+    );
+
+    handleGitHubError(status, data, `issue #${issueNumber} update`);
+    return (data as any).html_url;
+}
+
+// ─── Image Attachment (PRD §11.3) ─────────────────────────────────────────────
+
+/**
+ * Uploads a local image to GitHub by posting a comment with an uploaded asset URL.
+ * GitHub doesn't have a public "upload image" API, so we instead upload the raw
+ * image bytes via the issue comments upload flow and embed it in a comment.
+ *
+ * In practice, the simplest stable approach is to upload the image file contents
+ * as base64 inside a markdown code block or use the Markdown image embed with a
+ * data URL. However, GitHub comments properly render markdown image links.
+ *
+ * For now we post the local file as a comment with a notice — the recommended
+ * approach is to let the user know the image path for manual upload if GitHub
+ * doesn't support direct binary upload via the API.
+ *
+ * Note: GitHub's full image upload requires the "upload asset" endpoint which is
+ * only available for releases. For issue comments the standard is to paste an
+ * inline data URL or use a CDN. We'll post the image path info in the comment.
+ */
+export async function postImageComment(
+    owner: string,
+    repo: string,
+    issueNumber: number,
+    imagePath: string,
+    filename: string,
+    token: string
+): Promise<void> {
+    // Read the image and encode as base64
+    const imageData = fs.readFileSync(imagePath);
+    const base64 = imageData.toString('base64');
+    const ext = path.extname(filename).slice(1).toLowerCase();
+    const mimeMap: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
+    const mime = mimeMap[ext] ?? 'image/png';
+    const dataUrl = `data:${mime};base64,${base64}`;
+
+    const body = `**Screenshot from Slack:**\n![${filename}](${dataUrl})`;
+
+    const { status, data } = await githubRequest(
+        'POST',
+        `/repos/${owner}/${repo}/issues/${issueNumber}/comments`,
+        token,
+        { body }
+    );
+
+    if (status >= 400) {
+        // Warn and continue — never abort for image failure
+        process.stdout.write(`⚠  Could not attach image as comment. Issue was still created.\n`);
+        return;
+    }
+
+    // Clean up temp file after successful post
+    try { fs.unlinkSync(imagePath); } catch { /* best effort */ }
+}
+
+// ─── GitHub Project v2 Assignment (PRD §11.4) ─────────────────────────────────
+
+/**
+ * Adds an issue to a GitHub Project v2 and sets its Status to "Todo".
+ * Any failure prints a warning and returns; it never throws or aborts the issue.
+ */
+export async function addToProject(
+    projectId: string,
+    issueNodeId: string,
+    token: string
+): Promise<void> {
+    try {
+        // Step 1: Add item to project
+        const addResult = await githubGraphQL(
+            `mutation AddItem($projectId: ID!, $contentId: ID!) {
+        addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
+          item { id }
+        }
+      }`,
+            { projectId, contentId: issueNodeId },
+            token
+        ) as any;
+
+        if (addResult?.errors) {
+            process.stdout.write(`⚠  Could not add to project. Issue was still created.\n`);
+            return;
+        }
+
+        const itemId = addResult?.data?.addProjectV2ItemById?.item?.id;
+        if (!itemId) {
+            process.stdout.write(`⚠  Could not add to project. Issue was still created.\n`);
+            return;
+        }
+
+        // Step 2: Find the "Status" field and "Todo" option
+        const projectResult = await githubGraphQL(
+            `query GetProject($projectId: ID!) {
+        node(id: $projectId) {
+          ... on ProjectV2 {
+            fields(first: 20) {
+              nodes {
+                ... on ProjectV2SingleSelectField {
+                  id name
+                  options { id name }
+                }
+              }
+            }
+          }
+        }
+      }`,
+            { projectId },
+            token
+        ) as any;
+
+        const fields: any[] = projectResult?.data?.node?.fields?.nodes ?? [];
+        const statusField = fields.find((f: any) => f.name === 'Status');
+        if (!statusField) return; // No status field — skip, don't error
+
+        const todoOption = statusField.options?.find(
+            (o: any) => o.name?.toLowerCase() === 'todo'
+        );
+        if (!todoOption) return;
+
+        // Step 3: Set status to Todo
+        await githubGraphQL(
+            `mutation SetStatus($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+        updateProjectV2ItemFieldValue(input: {
+          projectId: $projectId
+          itemId: $itemId
+          fieldId: $fieldId
+          value: { singleSelectOptionId: $optionId }
+        }) { projectV2Item { id } }
+      }`,
+            {
+                projectId,
+                itemId,
+                fieldId: statusField.id,
+                optionId: todoOption.id,
+            },
+            token
+        );
+    } catch {
+        process.stdout.write(`⚠  Could not add to project. Issue was still created.\n`);
+    }
+}
+
+// ─── Post comment (for update --comment mode) ─────────────────────────────────
+
+export async function postIssueComment(
+    owner: string,
+    repo: string,
+    issueNumber: number,
+    body: string,
+    token: string
+): Promise<string> {
+    const { status, data } = await githubRequest(
+        'POST',
+        `/repos/${owner}/${repo}/issues/${issueNumber}/comments`,
+        token,
+        { body }
+    );
+
+    handleGitHubError(status, data, `comment on issue #${issueNumber}`);
+    return `https://github.com/${owner}/${repo}/issues/${issueNumber}`;
+}
