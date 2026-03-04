@@ -8,10 +8,25 @@
 
 ---
 
+## Table of Contents
+1. [Installation & Usage](#installation--usage)
+   - [Global Package Installation](#1-global-package-installation)
+   - [Remote Execution (npx)](#2-remote-execution-pulling-the-codebase)
+   - [Local Clone and Build](#3-local-clone-and-build)
+2. [Setup Guide](#setup-guide)
+3. [Usage Guide](#usage-guide)
+4. [Command Reference](#command-reference)
+5. [Team Participation & Contribution](#team-participation--contribution)
+6. [License](#license)
+
+---
+
+<a name="installation--usage"></a>
 ## Installation & Usage
 
 Depending on your role and frequency of use, there are three primary ways to interact with the tool. Regardless of the method chosen, you must first complete the [Setup Guide](doc/setup.md) to configure your Slack, GitHub, and AI provider tokens.
 
+<a name="1-global-package-installation"></a>
 ### 1. Global Package Installation
 
 For users who need to report issues frequently across various projects, installing the package globally is the most efficient method.
@@ -30,6 +45,7 @@ slack-ticket setup
 slack-ticket create <slack-thread-url>
 ```
 
+<a name="2-remote-execution-pulling-the-codebase"></a>
 ### 2. Remote Execution (Pulling the Codebase)
 
 If you only need to use the tool occasionally or want to ensure you are always running the absolute latest version without a permanent footprint, you can pull and execute it directly.
@@ -42,6 +58,7 @@ If you only need to use the tool occasionally or want to ensure you are always r
 npx slack-ticket create <slack-thread-url>
 ```
 
+<a name="3-local-clone-and-build"></a>
 ### 3. Local Clone and Build
 
 For advanced users or the development team, cloning the repository provides a local environment for testing and custom builds.
@@ -51,7 +68,7 @@ For advanced users or the development team, cloning the repository provides a lo
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/slack-ticket.git
+git clone https://github.com/elvis-ndubuisi/slack-ticket.git
 cd slack-ticket
 
 # Install and build
@@ -64,6 +81,17 @@ node dist/cli.js setup
 
 ---
 
+<a name="setup-guide"></a>
+## Setup Guide
+Detailed instructions for obtaining API tokens and configuring the tool can be found in the [Setup Guide](doc/setup.md).
+
+<a name="usage-guide"></a>
+## Usage Guide
+For a deep dive into every command, argument, and option available, refer to the [Usage Guide](doc/usage.md).
+
+---
+
+<a name="command-reference"></a>
 ## Command Reference
 
 | Command | Description |
@@ -76,6 +104,7 @@ node dist/cli.js setup
 
 ---
 
+<a name="team-participation--contribution"></a>
 ## Team Participation & Contribution
 
 ### For QA & Support Teams
@@ -97,5 +126,6 @@ Ensure you have followed the [Setup Guide](doc/setup.md) before starting develop
 
 ---
 
+<a name="license"></a>
 ## License
 ISC
