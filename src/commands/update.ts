@@ -2,7 +2,7 @@ import chalk from 'chalk';
 import ora from 'ora';
 import { confirm } from '@inquirer/prompts';
 import { readConfig, Config } from '../config.js';
-import { parseSlackUrl, fetchSingleMessage, combineMessageText } from '../slack.js';
+import { parseSlackUrl, fetchSingleMessage } from '../slack.js';
 import { generateIssueUpdate } from '../ai.js';
 import { fetchIssueBody, appendToIssueBody, postIssueComment } from '../github.js';
 
@@ -17,6 +17,11 @@ export async function runUpdate(
     const config = readConfig();
     const spinner = ora();
 
+    if (isNaN(issueNumber) || issueNumber <= 0) {
+        console.error(chalk.red('Error: Invalid issue number.'));
+        process.exit(1);
+    }
+
     // 1. Resolve repo
     const [owner, repo] = resolveRepo(options.repo, config);
 
@@ -27,34 +32,53 @@ export async function runUpdate(
 
     // 3. Fetch Slack messages
     spinner.start(`Fetching ${slackUrls.length} Slack message(s)...`);
-    const messages = await Promise.all(
-        slackUrls.map(url => fetchSingleMessage(parseSlackUrl(url), config.slack.botToken))
-    );
-    spinner.succeed(`Fetched all Slack messages.`);
+    const slackTexts: string[] = [];
+    for (const url of slackUrls) {
+        const parsed = parseSlackUrl(url);
+        const msg = await fetchSingleMessage(parsed, config.slack.botToken);
+        if (msg.text) slackTexts.push(msg.text);
+    }
+    spinner.succeed(`Fetched ${slackTexts.length} Slack messages.`);
 
-    const combinedNewText = combineMessageText(messages);
+    if (slackTexts.length === 0) {
+        console.log(chalk.yellow('No text found in provided Slack messages. Aborting update.'));
+        return;
+    }
 
-    // 4-5. AI generation
+    const combinedNewText = slackTexts.join('\n\n');
+
+    // 4. Generate AI update
     spinner.start('Generating update content with AI...');
     const aiOutput = await generateIssueUpdate(existingBody, combinedNewText, config.ai);
     spinner.succeed('Update content generated.');
 
-    // 6. Preview
-    const updateHeader = `### Update (${new Date().toLocaleDateString()})`;
-    const updateContent = `${updateHeader}\n\n**${aiOutput.update_summary}**\n\n${aiOutput.new_information}`;
+    if (!aiOutput.update_summary && !aiOutput.new_information) {
+        console.log(chalk.yellow('AI determined there is no new actionable information to add.'));
+        return;
+    }
 
+    // Assemble update content
+    const updateContent = [
+        aiOutput.update_summary ? `**Update:** ${aiOutput.update_summary}` : '',
+        aiOutput.new_information ? `\n${aiOutput.new_information}` : '',
+        `\n---\n*Sources:*`,
+        ...slackUrls.map(url => `- ${url}`)
+    ].filter(Boolean).join('\n');
+
+    // 5. Preview
     printUpdatePreview({
         issueNumber,
         owner,
         repo,
         summary: aiOutput.update_summary ?? '(none)',
         content: updateContent,
+        isComment: !!options.comment,
     });
 
-    // 7. Confirmation
+    // 6. Confirmation
     if (!options.yes && !options.dryRun) {
         const ok = await confirm({
-            message: 'Update this issue?',
+            message: 'Apply this update?',
             default: true,
         });
         if (!ok) {
@@ -69,7 +93,7 @@ export async function runUpdate(
         return;
     }
 
-    // 8. Apply update
+    // 7. Apply update
     let finalUrl: string;
     if (options.comment) {
         spinner.start('Posting update as comment...');
@@ -81,7 +105,7 @@ export async function runUpdate(
         spinner.succeed('Issue body updated.');
     }
 
-    // 9. Print URL
+    // 8. Print URL
     console.log(`\n${chalk.bold('Success!')} Issue URL: ${chalk.cyan(finalUrl)}`);
 }
 
@@ -106,11 +130,13 @@ function printUpdatePreview(p: {
     repo: string;
     summary: string;
     content: string;
+    isComment: boolean;
 }) {
     console.log(chalk.gray('\n' + '─'.repeat(60)));
     console.log(chalk.bold('  UPDATE PREVIEW'));
     console.log(chalk.gray('─'.repeat(60)));
-    console.log(`  ${chalk.bold('Issue:')}      #${p.issueNumber} (${p.owner}/${p.repo})`);
+    console.log(`  ${chalk.bold('Target:')}     ${p.owner}/${p.repo}#${p.issueNumber}`);
+    console.log(`  ${chalk.bold('Mode:')}       ${p.isComment ? 'New Comment' : 'Append to Body'}`);
     console.log(`  ${chalk.bold('Summary:')}    ${p.summary}`);
 
     console.log('\n  ' + chalk.bold('Content:'));
@@ -119,3 +145,4 @@ function printUpdatePreview(p: {
     console.log(chalk.gray('  ' + '┄'.repeat(50)));
     console.log(chalk.gray('─'.repeat(60)) + '\n');
 }
+

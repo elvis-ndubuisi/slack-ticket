@@ -6,86 +6,101 @@ import { githubRequest, githubGraphQL } from '../github.js';
 import { callAI } from '../ai.js';
 
 /**
- * doctor command implementation.
+ * doctor command implementation (PRD §8.4).
  * Runs a sequence of 6 checks to validate configuration and connectivity.
  */
 export async function runDoctor(): Promise<void> {
-    console.log(chalk.cyan('\nChecking your slack-ticket configuration...\n'));
+    console.log(chalk.cyan('\nStarting diagnostics...\n'));
 
     const config = readConfig();
-    const spinner = ora();
+    let allPassed = true;
 
-    // 1. Slack Token — auth.test
-    spinner.start('Checking Slack token...');
+    // 1. Slack Token
+    const s1 = ora('1. Validating Slack bot token...').start();
     try {
         const res = await slackGet('auth.test', {}, config.slack.botToken);
         if (!res.ok) throw new Error(res.error || 'Unknown Slack error');
-        spinner.succeed(`Slack token:    ${chalk.green('✓ Valid')} (bot: ${res.bot_id})`);
+        s1.succeed(`1. Validating Slack bot token: ${chalk.green('✓ Pass')}`);
     } catch (err: any) {
-        spinner.fail(`Slack token:    ${chalk.red('✗ Invalid')}`);
-        console.log(chalk.yellow(`    → Check your bot token in config or run 'slack-ticket setup'.`));
+        s1.fail(`1. Validating Slack bot token: ${chalk.red('✗ Fail')}`);
+        console.log(chalk.yellow(`   ↳ Fix: Run 'slack-ticket setup' to re-enter a valid xoxb- token.`));
+        allPassed = false;
     }
 
     // 2. Slack Channel Access
-    spinner.start('Checking Slack channel access...');
+    const s2 = ora('2. Checking Slack channel access...').start();
     try {
-        // We use a dummy list call to see if we can at least list public channels
+        // We do a list call to verify 'channels:read' scope as a proxy for basic access
         const res = await slackGet('conversations.list', { limit: 1, types: 'public_channel' }, config.slack.botToken);
         if (!res.ok) throw new Error(res.error || 'Unknown Slack error');
-        spinner.succeed(`Slack access:   ${chalk.green('✓ Valid')} (can list public channels)`);
+        s2.succeed(`2. Checking Slack channel access: ${chalk.green('✓ Pass')}`);
     } catch (err: any) {
-        spinner.fail(`Slack access:   ${chalk.red('✗ Limited')}`);
-        console.log(chalk.yellow(`    → Ensure your bot has 'channels:read' scope.`));
+        s2.fail(`2. Checking Slack channel access: ${chalk.red('✗ Fail')}`);
+        console.log(chalk.yellow(`   ↳ Fix: Ensure your Slack app has 'channels:read', 'channels:history', 'chat:write' scopes.`));
+        allPassed = false;
     }
 
-    // 3. GitHub Token — GET /user
-    spinner.start('Checking GitHub token...');
+    // 3. GitHub Token
+    const s3 = ora('3. Validating GitHub token...').start();
     try {
         const { status, data } = await githubRequest('GET', '/user', config.github.token);
         if (status !== 200) throw new Error((data as any)?.message || `HTTP ${status}`);
-        spinner.succeed(`GitHub token:   ${chalk.green('✓ Valid')} (user: ${(data as any).login})`);
+        s3.succeed(`3. Validating GitHub token: ${chalk.green('✓ Pass')}`);
     } catch (err: any) {
-        spinner.fail(`GitHub token:   ${chalk.red('✗ Invalid')}`);
-        console.log(chalk.yellow(`    → Check your GitHub token scopes (repo, project).`));
+        s3.fail(`3. Validating GitHub token: ${chalk.red('✗ Fail')}`);
+        console.log(chalk.yellow(`   ↳ Fix: Run 'slack-ticket setup' to re-enter a valid GitHub PAT.`));
+        allPassed = false;
     }
 
     // 4. GitHub Repo Access
-    spinner.start('Checking GitHub repo access...');
+    const s4 = ora('4. Checking GitHub repo access...').start();
     try {
         const { status, data } = await githubRequest('GET', `/repos/${config.github.owner}/${config.github.defaultRepo}`, config.github.token);
         if (status !== 200) throw new Error((data as any)?.message || `HTTP ${status}`);
-        spinner.succeed(`GitHub repo:    ${chalk.green('✓ Accessible')} (${config.github.owner}/${config.github.defaultRepo})`);
+        s4.succeed(`4. Checking GitHub repo access: ${chalk.green('✓ Pass')}`);
     } catch (err: any) {
-        spinner.fail(`GitHub repo:    ${chalk.red('✗ Not found or inaccessible')}`);
-        console.log(chalk.yellow(`    → Check owner/repo names in config.`));
+        s4.fail(`4. Checking GitHub repo access: ${chalk.red('✗ Fail')}`);
+        console.log(chalk.yellow(`   ↳ Fix: Token needs 'repo' scope, or verify '${config.github.owner}/${config.github.defaultRepo}' exists.`));
+        allPassed = false;
     }
 
-    // 5. GitHub Project Access (if configured)
-    if (config.github.defaultProject) {
-        spinner.start('Checking GitHub project access...');
+    // 5. GitHub Project Access
+    const s5 = ora('5. Checking GitHub Project v2 access...').start();
+    if (!config.github.defaultProject) {
+        s5.info(chalk.gray(`5. Checking GitHub Project v2 access: Skipped (Not configured)`));
+    } else {
         try {
             const query = `query($id: ID!) { node(id: $id) { id } }`;
             const res = await githubGraphQL(query, { id: config.github.defaultProject }, config.github.token) as any;
             if (res.errors || !res.data?.node) throw new Error('Project not found');
-            spinner.succeed(`GitHub project: ${chalk.green('✓ Accessible')} (${config.github.defaultProject})`);
+            s5.succeed(`5. Checking GitHub Project v2 access: ${chalk.green('✓ Pass')}`);
         } catch (err: any) {
-            spinner.fail(`GitHub project: ${chalk.red('✗ Not found or inaccessible')}`);
-            console.log(chalk.yellow(`    → Check your projectId in config.`));
+            s5.fail(`5. Checking GitHub Project v2 access: ${chalk.red('✗ Fail')}`);
+            console.log(chalk.yellow(`   ↳ Fix: Token needs 'project' scope, or verify project ID '${config.github.defaultProject}' is correct.`));
+            allPassed = false;
         }
-    } else {
-        console.log(chalk.gray(`  GitHub project: Skipped (no projectId in config)`));
     }
 
     // 6. AI Provider
-    spinner.start(`Checking AI provider (${config.ai.provider})...`);
+    const s6 = ora(`6. Pinging AI provider (${config.ai.provider})...`).start();
     try {
-        const res = await callAI('Respond with: ok', config.ai);
-        if (!res.toLowerCase().includes('ok')) throw new Error('AI returned unexpected response');
-        spinner.succeed(`AI provider:    ${chalk.green('✓ Responsive')} (${config.ai.provider} / ${config.ai.model})`);
+        // Simple ping request to trigger a response and validate auth + network
+        const res = await callAI('Respond with the exact word: "ok"', config.ai);
+        if (!res.toLowerCase().includes('ok')) throw new Error('AI returned unexpected response format');
+        s6.succeed(`6. Pinging AI provider: ${chalk.green('✓ Pass')}`);
     } catch (err: any) {
-        spinner.fail(`AI provider:    ${chalk.red('✗ Connection failed')}`);
-        console.log(chalk.yellow(`    → Check AI endpoint, model, and API key.`));
+        s6.fail(`6. Pinging AI provider: ${chalk.red('✗ Fail')}`);
+        console.log(chalk.yellow(`   ↳ Fix: Verify your AI API key and base URL in 'slack-ticket setup'.`));
+        allPassed = false;
     }
 
-    console.log(chalk.cyan('\nChecks complete.\n'));
+    console.log(chalk.gray('\n' + '─'.repeat(40)));
+    
+    if (allPassed) {
+        console.log(chalk.green.bold('All systems operational! You are ready to create tickets.'));
+    } else {
+        console.log(chalk.red.bold('Some checks failed. Please fix the issues above and try again.'));
+        process.exit(1);
+    }
 }
+
