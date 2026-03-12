@@ -47,7 +47,7 @@ export async function runCreate(slackUrl: string, options: Record<string, any>):
     const aiOutput = await generateIssueFromThread(combinedText, config.ai);
     spinner.succeed('AI content generated.');
 
-    // 8. Assemble final body
+    // 8. Assemble final body (issue_type-aware; screenshot reference handled via has_screenshot in AI output)
     const finalBody = assembleIssueBody(aiOutput, severity, component, slackUrl);
 
     // 9. Display preview

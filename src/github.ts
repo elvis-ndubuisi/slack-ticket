@@ -9,9 +9,7 @@
  */
 
 import https from 'https';
-import crypto from 'crypto';
 import fs from 'fs';
-import path from 'path';
 import { CLIError } from './error.js';
 import type { Config, LabelsConfig } from './config.js';
 import type { CreateAIOutput } from './ai.js';
@@ -215,7 +213,7 @@ export async function filterExistingLabels(
 
 /**
  * Assembles the full GitHub issue body from AI output + metadata.
- * Sections with null AI output are omitted (PRD §9.5).
+ * Adapts structure based on issue_type (PRD §9.5).
  */
 export function assembleIssueBody(
     ai: CreateAIOutput,
@@ -224,18 +222,45 @@ export function assembleIssueBody(
     slackUrl: string
 ): string {
     const sections: string[] = [];
+    const isBug = ai.issue_type === 'bug_report';
 
     if (ai.summary) sections.push(`## Summary\n${ai.summary}`);
-    if (ai.steps_to_reproduce) sections.push(`## Steps to Reproduce\n${ai.steps_to_reproduce}`);
-    if (ai.expected_behavior) sections.push(`## Expected Behavior\n${ai.expected_behavior}`);
-    if (ai.actual_behavior) sections.push(`## Actual Behavior\n${ai.actual_behavior}`);
+
+    if (ai.details) sections.push(`## Details\n${ai.details}`);
+
+    // Bug-specific sections
+    if (isBug) {
+        if (ai.steps_to_reproduce) sections.push(`## Steps to Reproduce\n${ai.steps_to_reproduce}`);
+        if (ai.expected_behavior) sections.push(`## Expected Behavior\n${ai.expected_behavior}`);
+        if (ai.actual_behavior) sections.push(`## Actual Behavior\n${ai.actual_behavior}`);
+    }
+
+    // Screenshot note — simple Slack link, no downloads or broken data URLs
+    if (ai.has_screenshot) {
+        sections.push(`## Screenshot\n> 📸 A screenshot was shared in the original Slack message. [View in Slack](${slackUrl})`);
+    }
 
     sections.push(`## Severity\n${severity}`);
     if (component) sections.push(`## Component\n${component}`);
 
-    sections.push(`---\n**Slack Thread:** ${slackUrl}`);
+    sections.push(`---\n**Type:** ${formatIssueType(ai.issue_type)}  \n**Slack Thread:** ${slackUrl}`);
 
     return sections.join('\n\n');
+}
+
+function formatIssueType(type: string): string {
+    const map: Record<string, string> = {
+        bug_report: 'Bug Report',
+        data_request: 'Data Request',
+        account_management: 'Account Management',
+        billing_issue: 'Billing Issue',
+        configuration_change: 'Configuration Change',
+        access_issue: 'Access Issue',
+        investigation: 'Investigation',
+        feature_request: 'Feature Request',
+        general: 'General',
+    };
+    return map[type] ?? type;
 }
 
 /**
@@ -311,21 +336,13 @@ export async function appendToIssueBody(
 // ─── Image Attachment (PRD §11.3) ─────────────────────────────────────────────
 
 /**
- * Uploads a local image to GitHub by posting a comment with an uploaded asset URL.
- * GitHub doesn't have a public "upload image" API, so we instead upload the raw
- * image bytes via the issue comments upload flow and embed it in a comment.
+ * Posts a follow-up comment with the local image path so the user can
+ * drag-and-drop it into the GitHub issue via the web UI.
  *
- * In practice, the simplest stable approach is to upload the image file contents
- * as base64 inside a markdown code block or use the Markdown image embed with a
- * data URL. However, GitHub comments properly render markdown image links.
- *
- * For now we post the local file as a comment with a notice — the recommended
- * approach is to let the user know the image path for manual upload if GitHub
- * doesn't support direct binary upload via the API.
- *
- * Note: GitHub's full image upload requires the "upload asset" endpoint which is
- * only available for releases. For issue comments the standard is to paste an
- * inline data URL or use a CDN. We'll post the image path info in the comment.
+ * WHY: GitHub's REST API has no public endpoint for uploading images to
+ * issue bodies/comments — the upload endpoint is only for release assets.
+ * Embedding a base64 data: URL is blocked by GitHub's Content Security Policy
+ * and renders as a broken image. Posting the path is the only reliable approach.
  */
 export async function postImageComment(
     owner: string,
@@ -335,17 +352,24 @@ export async function postImageComment(
     filename: string,
     token: string
 ): Promise<void> {
-    // Read the image and encode as base64
-    const imageData = fs.readFileSync(imagePath);
-    const base64 = imageData.toString('base64');
-    const ext = path.extname(filename).slice(1).toLowerCase();
-    const mimeMap: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
-    const mime = mimeMap[ext] ?? 'image/png';
-    const dataUrl = `data:${mime};base64,${base64}`;
+    const lines = [
+        `### 📎 Screenshot from Slack`,
+        ``,
+        `A screenshot was extracted from the Slack thread and saved to your local machine:`,
+        ``,
+        `\`\`\``,
+        `${imagePath}`,
+        `\`\`\``,
+        ``,
+        `**To attach it to this issue:**`,
+        `1. Open this issue in your browser`,
+        `2. Click **Edit** on the issue body (pencil icon)`,
+        `3. Drag-and-drop the file above into the editor area`,
+        `4. Replace the placeholder in the **Screenshot** section with the uploaded image`,
+    ];
+    const body = lines.join('\n');
 
-    const body = `**Screenshot from Slack:**\n![${filename}](${dataUrl})`;
-
-    const { status, data } = await githubRequest(
+    const { status } = await githubRequest(
         'POST',
         `/repos/${owner}/${repo}/issues/${issueNumber}/comments`,
         token,
@@ -353,13 +377,9 @@ export async function postImageComment(
     );
 
     if (status >= 400) {
-        // Warn and continue — never abort for image failure
-        process.stdout.write(`⚠  Could not attach image as comment. Issue was still created.\n`);
-        return;
+        process.stdout.write(`⚠  Could not post image instructions. Your image is saved at: ${imagePath}\n`);
     }
-
-    // Clean up temp file after successful post
-    try { fs.unlinkSync(imagePath); } catch { /* best effort */ }
+    // NOTE: Do NOT delete the temp file — the user still needs it to upload manually.
 }
 
 // ─── GitHub Project v2 Assignment (PRD §11.4) ─────────────────────────────────

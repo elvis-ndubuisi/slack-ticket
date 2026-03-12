@@ -16,10 +16,13 @@ import type { AIConfig } from './config.js';
 
 export interface CreateAIOutput {
     title: string;
+    issue_type: string;
     summary: string | null;
+    details: string | null;
     steps_to_reproduce: string | null;
     expected_behavior: string | null;
     actual_behavior: string | null;
+    has_screenshot: boolean;
 }
 
 export interface UpdateAIOutput {
@@ -30,24 +33,40 @@ export interface UpdateAIOutput {
 // ─── Prompt Templates (PRD §9.3) ──────────────────────────────────────────────
 
 function buildCreatePrompt(threadText: string): string {
-    return `You are a QA documentation specialist. Your job is to convert a Slack conversation into a structured GitHub issue.
+    return `You are a support ticket specialist. Your job is to convert a Slack conversation into a well-structured GitHub issue ticket.
 
 Return ONLY a valid JSON object. No markdown fences. No preamble. No commentary.
 
 Schema:
 {
-  "title": "Short, specific issue title (max 80 chars)",
-  "summary": "1–3 sentence description of the issue",
-  "steps_to_reproduce": "Numbered steps if inferable, otherwise null",
-  "expected_behavior": "What should happen, if inferable, otherwise null",
-  "actual_behavior": "What actually happens, if inferable, otherwise null"
+  "title": "Short, specific ticket title (max 80 chars)",
+  "issue_type": "One of: bug_report | data_request | account_management | billing_issue | configuration_change | access_issue | investigation | feature_request | general",
+  "summary": "1–3 sentence neutral description of what is being requested or reported",
+  "details": "Any additional context, IDs, account names, URLs, or specifics mentioned that are relevant",
+  "steps_to_reproduce": "Numbered steps IF this is a bug_report and steps can be inferred. Otherwise null.",
+  "expected_behavior": "What should happen IF this is a bug_report and it can be inferred. Otherwise null.",
+  "actual_behavior": "What is actually happening IF this is a bug_report and it can be inferred. Otherwise null.",
+  "has_screenshot": "true if the message mentions an image, screenshot, attachment, or photo. Otherwise false."
 }
+
+issue_type guide:
+- bug_report: Something is broken, not working, or behaving unexpectedly
+- data_request: Request for data, reports, statements, or confirmation of information
+- account_management: Transfer, reassign, create, or update an account or user
+- billing_issue: Invoice, payment, credit note, or pricing discrepancy
+- configuration_change: Delete, update settings, or change system configuration
+- access_issue: Login problems, blank screens, dashboard not loading, permissions
+- investigation: Mismatch, discrepancy, or unclear situation that needs root cause analysis
+- feature_request: New capability or enhancement request
+- general: Does not clearly fit any of the above
 
 Rules:
 - Do NOT suggest labels, assignees, severity, milestones, or projects
-- Do NOT reference the reporter's name or Slack-specific context
+- Do NOT reference the reporter's name, @mentions, or Slack-specific context
 - Do NOT include any field not in the schema above
-- If a field cannot be reasonably inferred, set it to null
+- If a field cannot be reasonably inferred, set it to null (or false for booleans)
+- Be neutral and professional — this ticket may be read by engineers, QA, or support staff
+- This tool is used across many companies and industries — do not assume specific domain knowledge
 
 Slack Thread:
 ---
@@ -246,7 +265,8 @@ function stripForbiddenContent(obj: Record<string, unknown>): Record<string, unk
  */
 export function parseCreateOutput(raw: string): CreateAIOutput {
     const ALLOWED_KEYS = new Set<string>([
-        'title', 'summary', 'steps_to_reproduce', 'expected_behavior', 'actual_behavior',
+        'title', 'issue_type', 'summary', 'details',
+        'steps_to_reproduce', 'expected_behavior', 'actual_behavior', 'has_screenshot',
     ]);
 
     let parsed = tryParse(raw) ?? tryParse(stripMarkdownFences(raw));
@@ -274,10 +294,13 @@ export function parseCreateOutput(raw: string): CreateAIOutput {
 
     return {
         title: String(obj.title ?? '').slice(0, 80),
+        issue_type: String(obj.issue_type ?? 'general'),
         summary: (obj.summary as string | null) ?? null,
+        details: (obj.details as string | null) ?? null,
         steps_to_reproduce: (obj.steps_to_reproduce as string | null) ?? null,
         expected_behavior: (obj.expected_behavior as string | null) ?? null,
         actual_behavior: (obj.actual_behavior as string | null) ?? null,
+        has_screenshot: Boolean(obj.has_screenshot ?? false),
     };
 }
 
