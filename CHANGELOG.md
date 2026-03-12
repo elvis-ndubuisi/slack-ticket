@@ -1,0 +1,8 @@
+# slack-ticket
+
+## 0.2.0
+
+### Minor Changes
+
+- 4c58913: complete v0.1.0 implementation - Slack-to-GitHub AI bridge
+- 0211a16: feat(ai,github): implement smart issue classification and improve image handling
