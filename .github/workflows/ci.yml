@@ -28,13 +28,8 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Format Check
-        run: pnpm run format --check
-        continue-on-error: true # Not blocking currently
-
       - name: Lint
         run: pnpm run lint
-        continue-on-error: true # ESLint config issue needs later fixing
       
       - name: Build
         run: pnpm run build

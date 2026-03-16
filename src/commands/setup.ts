@@ -5,11 +5,11 @@
  * Walks the user through 14 prompts (PRD §8.1), validates tokens, and saves config.
  */
 
-import { input, select, confirm } from '@inquirer/prompts';
-import chalk from 'chalk';
-import ora from 'ora';
-import https from 'https';
-import { writeConfig, getConfigPath, maskToken, type Config } from '../config.js';
+import { input, select, confirm } from '@inquirer/prompts'
+import chalk from 'chalk'
+import ora from 'ora'
+import https from 'https'
+import { writeConfig, getConfigPath, maskToken, type Config } from '../config.js'
 
 // ─── Provider base URL map (PRD §8.1) ─────────────────────────────────────────
 const PROVIDER_BASE_URLS: Record<string, string> = {
@@ -18,7 +18,7 @@ const PROVIDER_BASE_URLS: Record<string, string> = {
   gemini: 'https://generativelanguage.googleapis.com/v1beta/openai',
   local: 'http://localhost:11434/v1',
   custom: '',
-};
+}
 
 // ─── Provider default model suggestions ───────────────────────────────────────
 const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
@@ -27,7 +27,7 @@ const PROVIDER_DEFAULT_MODELS: Record<string, string> = {
   gemini: 'gemini-1.5-pro',
   local: 'llama3',
   custom: '',
-};
+}
 
 // ─── Validation helpers ────────────────────────────────────────────────────────
 
@@ -37,7 +37,7 @@ async function httpsPost(
   body: string
 ): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
-    const parsed = new URL(url);
+    const parsed = new URL(url)
     const req = https.request(
       {
         hostname: parsed.hostname,
@@ -46,16 +46,16 @@ async function httpsPost(
         headers: { ...headers, 'Content-Length': Buffer.byteLength(body) },
       },
       (res) => {
-        let data = '';
-        res.on('data', (chunk) => (data += chunk));
-        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: data }));
+        let data = ''
+        res.on('data', (chunk) => (data += chunk))
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: data }))
       }
-    );
-    req.on('error', reject);
-    setTimeout(() => req.destroy(new Error('timeout')), 10000);
-    req.write(body);
-    req.end();
-  });
+    )
+    req.on('error', reject)
+    setTimeout(() => req.destroy(new Error('timeout')), 10000)
+    req.write(body)
+    req.end()
+  })
 }
 
 async function httpsGet(
@@ -63,19 +63,19 @@ async function httpsGet(
   headers: Record<string, string>
 ): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
-    const parsed = new URL(url);
+    const parsed = new URL(url)
     const req = https.request(
       { hostname: parsed.hostname, path: parsed.pathname + parsed.search, method: 'GET', headers },
       (res) => {
-        let data = '';
-        res.on('data', (chunk) => (data += chunk));
-        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: data }));
+        let data = ''
+        res.on('data', (chunk) => (data += chunk))
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: data }))
       }
-    );
-    req.on('error', reject);
-    setTimeout(() => req.destroy(new Error('timeout')), 10000);
-    req.end();
-  });
+    )
+    req.on('error', reject)
+    setTimeout(() => req.destroy(new Error('timeout')), 10000)
+    req.end()
+  })
 }
 
 /**
@@ -90,11 +90,11 @@ async function validateSlack(token: string): Promise<boolean> {
         'Content-Type': 'application/json',
       },
       '{}'
-    );
-    const data = JSON.parse(res.body) as { ok: boolean };
-    return data.ok === true;
+    )
+    const data = JSON.parse(res.body) as { ok: boolean }
+    return data.ok === true
   } catch {
-    return false;
+    return false
   }
 }
 
@@ -111,17 +111,17 @@ async function validateGitHub(
       Authorization: `Bearer ${token}`,
       'User-Agent': 'slack-ticket-cli',
       Accept: 'application/vnd.github+json',
-    });
-    if (userRes.status !== 200) return { userOk: false, repoOk: false };
+    })
+    if (userRes.status !== 200) return { userOk: false, repoOk: false }
 
     const repoRes = await httpsGet(`https://api.github.com/repos/${owner}/${repo}`, {
       Authorization: `Bearer ${token}`,
       'User-Agent': 'slack-ticket-cli',
       Accept: 'application/vnd.github+json',
-    });
-    return { userOk: true, repoOk: repoRes.status === 200 };
+    })
+    return { userOk: true, repoOk: repoRes.status === 200 }
   } catch {
-    return { userOk: false, repoOk: false };
+    return { userOk: false, repoOk: false }
   }
 }
 
@@ -136,7 +136,7 @@ async function validateAI(
 ): Promise<boolean> {
   try {
     const endpoint =
-      provider === 'anthropic' ? `${baseUrl}/v1/messages` : `${baseUrl}/chat/completions`;
+      provider === 'anthropic' ? `${baseUrl}/v1/messages` : `${baseUrl}/chat/completions`
 
     const body =
       provider === 'anthropic'
@@ -149,62 +149,62 @@ async function validateAI(
             model,
             messages: [{ role: 'user', content: 'Respond with: ok' }],
             max_tokens: 10,
-          });
+          })
 
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
-    };
-
-    if (provider === 'anthropic') {
-      headers['x-api-key'] = apiKey;
-      headers['anthropic-version'] = '2023-06-01';
-    } else {
-      headers['Authorization'] = `Bearer ${apiKey}`;
     }
 
-    const res = await httpsPost(endpoint, headers, body);
-    return res.status >= 200 && res.status < 300;
+    if (provider === 'anthropic') {
+      headers['x-api-key'] = apiKey
+      headers['anthropic-version'] = '2023-06-01'
+    } else {
+      headers['Authorization'] = `Bearer ${apiKey}`
+    }
+
+    const res = await httpsPost(endpoint, headers, body)
+    return res.status >= 200 && res.status < 300
   } catch {
-    return false;
+    return false
   }
 }
 
 // ─── Main setup flow ───────────────────────────────────────────────────────────
 
 export async function runSetup(): Promise<void> {
-  console.log(chalk.bold('\n👋 Welcome to slack-ticket setup!\n'));
+  console.log(chalk.bold('\n👋 Welcome to slack-ticket setup!\n'))
   console.log(
     "You'll be prompted for your tokens and preferences. Press Enter to accept defaults.\n"
-  );
+  )
 
   // ── 1. Slack bot token ──
   const slackBotToken = await input({
     message: 'Slack Bot Token (xoxb-...):',
     validate: (v: string) => (v.startsWith('xoxb-') ? true : 'Must start with xoxb-'),
-  });
+  })
 
   // ── 2. GitHub PAT ──
   const githubToken = await input({
     message: 'GitHub Personal Access Token (ghp_...):',
     validate: (v: string) => (v.length > 10 ? true : 'Token looks too short'),
-  });
+  })
 
   // ── 3. GitHub owner ──
   const githubOwner = await input({
     message: 'GitHub Owner (org or username):',
     validate: (v: string) => (v.trim().length > 0 ? true : 'Required'),
-  });
+  })
 
   // ── 4. Default repo ──
   const defaultRepo = await input({
     message: 'Default GitHub Repository name:',
     validate: (v: string) => (v.trim().length > 0 ? true : 'Required'),
-  });
+  })
 
   // ── 5. GitHub Project ID (optional) ──
   const defaultProject = await input({
     message: 'GitHub Project v2 ID (optional — press Enter to skip):',
-  });
+  })
 
   // ── 6. AI provider ──
   const provider = await select<string>({
@@ -216,27 +216,27 @@ export async function runSetup(): Promise<void> {
       { name: 'Local (Ollama)', value: 'local' },
       { name: 'Custom (OpenAI-compatible)', value: 'custom' },
     ],
-  });
+  })
 
   // ── 7. AI base URL (pre-filled) ──
   const baseUrl = await input({
     message: 'AI Base URL:',
     default: PROVIDER_BASE_URLS[provider] ?? '',
     validate: (v: string) => (v.trim().length > 0 ? true : 'Required'),
-  });
+  })
 
   // ── 8. AI API key ──
   const aiApiKey = await input({
     message: 'AI API Key:',
     validate: (v: string) => (v.trim().length > 0 ? true : 'Required'),
-  });
+  })
 
   // ── 9. AI model ──
   const aiModel = await input({
     message: 'AI Model name:',
     default: PROVIDER_DEFAULT_MODELS[provider] ?? '',
     validate: (v: string) => (v.trim().length > 0 ? true : 'Required'),
-  });
+  })
 
   // ── 10. AI timeout ──
   const timeoutInput = await input({
@@ -244,23 +244,23 @@ export async function runSetup(): Promise<void> {
     default: '20000',
     validate: (v: string) =>
       !isNaN(Number(v)) && Number(v) > 0 ? true : 'Must be a positive number',
-  });
+  })
 
   // ── 11. Image handling ──
   const imageHandling = await confirm({
     message: 'Enable image handling (attach Slack screenshots to GitHub issues)?',
     default: true,
-  });
+  })
 
   // ── 12. Default thread depth ──
   const threadDepthInput = await input({
     message: 'Default thread depth — opening messages to fetch (1–20):',
     default: '3',
     validate: (v: string) => {
-      const n = Number(v);
-      return n >= 1 && n <= 20 ? true : 'Must be between 1 and 20';
+      const n = Number(v)
+      return n >= 1 && n <= 20 ? true : 'Must be between 1 and 20'
     },
-  });
+  })
 
   // ── 13. Default severity ──
   const severity = await select<'low' | 'medium' | 'high' | 'critical'>({
@@ -272,32 +272,32 @@ export async function runSetup(): Promise<void> {
       { name: 'Critical', value: 'critical' },
     ],
     default: 'medium',
-  });
+  })
 
   // ── 14. Default component ──
   const component = await input({
     message: 'Default component (optional — press Enter to skip):',
-  });
+  })
 
   // ── Token validation ──────────────────────────────────────────────────────────
-  console.log('\n' + chalk.bold('Validating tokens...'));
+  console.log('\n' + chalk.bold('Validating tokens...'))
 
-  let slackOk = false;
-  let githubUserOk = false;
-  let githubRepoOk = false;
-  let aiOk = false;
+  let slackOk = false
+  let githubUserOk = false
+  let githubRepoOk = false
+  let aiOk = false
 
-  const spinner = ora('Checking Slack...').start();
-  slackOk = await validateSlack(slackBotToken);
+  const spinner = ora('Checking Slack...').start()
+  slackOk = await validateSlack(slackBotToken)
   spinner.stopAndPersist({
     symbol: slackOk ? chalk.green('✓') : chalk.red('✗'),
     text: slackOk ? `Slack: validated` : `Slack: ${chalk.red('validation failed')}`,
-  });
+  })
 
-  spinner.start('Checking GitHub...');
-  const ghResult = await validateGitHub(githubToken, githubOwner, defaultRepo);
-  githubUserOk = ghResult.userOk;
-  githubRepoOk = ghResult.repoOk;
+  spinner.start('Checking GitHub...')
+  const ghResult = await validateGitHub(githubToken, githubOwner, defaultRepo)
+  githubUserOk = ghResult.userOk
+  githubRepoOk = ghResult.repoOk
   spinner.stopAndPersist({
     symbol: githubUserOk && githubRepoOk ? chalk.green('✓') : chalk.red('✗'),
     text:
@@ -306,27 +306,27 @@ export async function runSetup(): Promise<void> {
         : `GitHub: ${chalk.red(
             !githubUserOk ? 'token invalid' : `repo '${githubOwner}/${defaultRepo}' not found`
           )}`,
-  });
+  })
 
-  spinner.start('Checking AI provider...');
-  aiOk = await validateAI(baseUrl, aiApiKey, aiModel, provider);
+  spinner.start('Checking AI provider...')
+  aiOk = await validateAI(baseUrl, aiApiKey, aiModel, provider)
   spinner.stopAndPersist({
     symbol: aiOk ? chalk.green('✓') : chalk.red('✗'),
     text: aiOk
       ? `AI: validated (${provider} / ${aiModel})`
       : `AI: ${chalk.red('validation failed')}`,
-  });
+  })
 
-  const allValid = slackOk && githubUserOk && githubRepoOk && aiOk;
+  const allValid = slackOk && githubUserOk && githubRepoOk && aiOk
 
   if (!allValid) {
     const saveAnyway = await confirm({
       message: chalk.yellow('⚠  Some validations failed. Save config anyway?'),
       default: false,
-    });
+    })
     if (!saveAnyway) {
-      console.log(chalk.red('\nSetup cancelled. No config saved.'));
-      process.exit(0);
+      console.log(chalk.red('\nSetup cancelled. No config saved.'))
+      process.exit(0)
     }
   }
 
@@ -373,33 +373,33 @@ export async function runSetup(): Promise<void> {
         dashboard: ['component:dashboard'],
       },
     },
-  };
+  }
 
-  writeConfig(config);
+  writeConfig(config)
 
   // ── Post-save summary ──────────────────────────────────────────────────────────
-  const configPath = getConfigPath();
-  console.log(`\n${chalk.green('✓')} Config saved to ${chalk.cyan(configPath)}\n`);
+  const configPath = getConfigPath()
+  console.log(`\n${chalk.green('✓')} Config saved to ${chalk.cyan(configPath)}\n`)
   console.log(
     `  Slack:        ${slackOk ? chalk.green('validated ✓') : chalk.red('not validated ✗')}`
-  );
+  )
   console.log(
     `  GitHub:       ${
       githubUserOk && githubRepoOk
         ? chalk.green(`validated ✓  (${githubOwner}/${defaultRepo})`)
         : chalk.red('not validated ✗')
     }`
-  );
+  )
   console.log(
     `  AI:           ${aiOk ? chalk.green(`validated ✓  (${provider} / ${aiModel})`) : chalk.red('not validated ✗')}`
-  );
+  )
   if (defaultProject.trim()) {
-    console.log(`  Project:      ${defaultProject.trim()}`);
+    console.log(`  Project:      ${defaultProject.trim()}`)
   }
-  console.log(`  Images:       ${imageHandling ? 'enabled' : 'disabled'}`);
-  console.log(`  Thread depth: ${threadDepthInput} messages`);
-  console.log(`  Severity:     ${severity}`);
+  console.log(`  Images:       ${imageHandling ? 'enabled' : 'disabled'}`)
+  console.log(`  Thread depth: ${threadDepthInput} messages`)
+  console.log(`  Severity:     ${severity}`)
   console.log(
     `\nRun ${chalk.cyan("'slack-ticket doctor'")} at any time to re-validate your setup.\n`
-  );
+  )
 }

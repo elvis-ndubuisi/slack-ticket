@@ -9,11 +9,11 @@
  * 6 = Config error
  */
 export class CLIError extends Error {
-  public exitCode: number;
+  public exitCode: number
 
   constructor(message: string, exitCode: number = 1) {
-    super(message);
-    this.name = 'CLIError';
-    this.exitCode = exitCode;
+    super(message)
+    this.name = 'CLIError'
+    this.exitCode = exitCode
   }
 }
