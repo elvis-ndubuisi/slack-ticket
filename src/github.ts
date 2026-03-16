@@ -17,17 +17,17 @@ import type { CreateAIOutput } from './ai.js';
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
 export interface CreatedIssue {
-    number: number;
-    url: string;
-    nodeId: string;
+  number: number;
+  url: string;
+  nodeId: string;
 }
 
 export interface LabelResolutionOptions {
-    rawSlackText: string;
-    severity: string;
-    component: string | null;
-    extraLabels: string[];
-    labelsConfig: LabelsConfig;
+  rawSlackText: string;
+  severity: string;
+  component: string | null;
+  extraLabels: string[];
+  labelsConfig: LabelsConfig;
 }
 
 // ─── HTTP Helpers ──────────────────────────────────────────────────────────────
@@ -36,96 +36,113 @@ export interface LabelResolutionOptions {
  * Internal helper for GitHub REST requests.
  */
 export async function githubRequest(
-    method: string,
-    path: string,
-    token: string,
-    body?: unknown
+  method: string,
+  path: string,
+  token: string,
+  body?: unknown
 ): Promise<{ status: number; data: unknown }> {
-    const payload = body ? JSON.stringify(body) : undefined;
+  const payload = body ? JSON.stringify(body) : undefined;
 
-    return new Promise((resolve, reject) => {
-        const req = https.request(
-            {
-                hostname: 'api.github.com',
-                path,
-                method,
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    Accept: 'application/vnd.github+json',
-                    'User-Agent': 'slack-ticket-cli',
-                    'X-GitHub-Api-Version': '2022-11-28',
-                    ...(payload && { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) }),
-                },
-            },
-            (res) => {
-                let data = '';
-                res.on('data', (chunk) => (data += chunk));
-                res.on('end', () => {
-                    let parsed: unknown = data;
-                    try { parsed = JSON.parse(data); } catch { /* leave as string */ }
-                    resolve({ status: res.statusCode ?? 0, data: parsed });
-                });
-            }
-        );
-        req.on('error', reject);
-        if (payload) req.write(payload);
-        req.end();
-    });
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      {
+        hostname: 'api.github.com',
+        path,
+        method,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          Accept: 'application/vnd.github+json',
+          'User-Agent': 'slack-ticket-cli',
+          'X-GitHub-Api-Version': '2022-11-28',
+          ...(payload && {
+            'Content-Type': 'application/json',
+            'Content-Length': Buffer.byteLength(payload),
+          }),
+        },
+      },
+      (res) => {
+        let data = '';
+        res.on('data', (chunk) => (data += chunk));
+        res.on('end', () => {
+          let parsed: unknown = data;
+          try {
+            parsed = JSON.parse(data);
+          } catch {
+            /* leave as string */
+          }
+          resolve({ status: res.statusCode ?? 0, data: parsed });
+        });
+      }
+    );
+    req.on('error', reject);
+    if (payload) req.write(payload);
+    req.end();
+  });
 }
 
 /**
  * Internal helper for GitHub GraphQL requests.
  */
 export async function githubGraphQL(
-    query: string,
-    variables: Record<string, unknown>,
-    token: string
+  query: string,
+  variables: Record<string, unknown>,
+  token: string
 ): Promise<unknown> {
-    const payload = JSON.stringify({ query, variables });
+  const payload = JSON.stringify({ query, variables });
 
-    return new Promise((resolve, reject) => {
-        const req = https.request(
-            {
-                hostname: 'api.github.com',
-                path: '/graphql',
-                method: 'POST',
-                headers: {
-                    Authorization: `Bearer ${token}`,
-                    'Content-Type': 'application/json',
-                    'User-Agent': 'slack-ticket-cli',
-                    'Content-Length': Buffer.byteLength(payload),
-                },
-            },
-            (res) => {
-                let data = '';
-                res.on('data', (chunk) => (data += chunk));
-                res.on('end', () => {
-                    try { resolve(JSON.parse(data)); } catch { resolve(data); }
-                });
-            }
-        );
-        req.on('error', reject);
-        req.write(payload);
-        req.end();
-    });
+  return new Promise((resolve, reject) => {
+    const req = https.request(
+      {
+        hostname: 'api.github.com',
+        path: '/graphql',
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+          'User-Agent': 'slack-ticket-cli',
+          'Content-Length': Buffer.byteLength(payload),
+        },
+      },
+      (res) => {
+        let data = '';
+        res.on('data', (chunk) => (data += chunk));
+        res.on('end', () => {
+          try {
+            resolve(JSON.parse(data));
+          } catch {
+            resolve(data);
+          }
+        });
+      }
+    );
+    req.on('error', reject);
+    req.write(payload);
+    req.end();
+  });
 }
 
 function handleGitHubError(status: number, data: unknown, context: string): void {
-    if (status === 401 || status === 403) {
-        const requiredScopes = 'repo, project';
-        throw new CLIError(`GitHub token lacks permissions for ${context}. Required scopes: ${requiredScopes}.`, 5);
-    }
-    if (status === 404) {
-        throw new CLIError(`GitHub repository not found (${context}). Check 'github.owner' and 'github.defaultRepo' in config.`, 5);
-    }
-    if (status === 429) {
-        const reset = (data as any)?.message ?? 'unknown';
-        throw new CLIError(`GitHub rate limited (${context}). Reset at: ${reset}. Try again later.`, 5);
-    }
-    if (status >= 400) {
-        const msg = (data as any)?.message ?? `HTTP ${status}`;
-        throw new CLIError(`GitHub API error during ${context}: ${msg}`, 5);
-    }
+  if (status === 401 || status === 403) {
+    const requiredScopes = 'repo, project';
+    throw new CLIError(
+      `GitHub token lacks permissions for ${context}. Required scopes: ${requiredScopes}.`,
+      5
+    );
+  }
+  if (status === 404) {
+    throw new CLIError(
+      `GitHub repository not found (${context}). Check 'github.owner' and 'github.defaultRepo' in config.`,
+      5
+    );
+  }
+  if (status === 429) {
+    const reset = (data as any)?.message ?? 'unknown';
+    throw new CLIError(`GitHub rate limited (${context}). Reset at: ${reset}. Try again later.`, 5);
+  }
+  if (status >= 400) {
+    const msg = (data as any)?.message ?? `HTTP ${status}`;
+    throw new CLIError(`GitHub API error during ${context}: ${msg}`, 5);
+  }
 }
 
 // ─── Label Resolution (PRD §11.2) ─────────────────────────────────────────────
@@ -140,32 +157,32 @@ function handleGitHubError(status: number, data: unknown, context: string): void
  * 4. --labels flag additions
  */
 export function resolveLabels(opts: LabelResolutionOptions): string[] {
-    const { rawSlackText, severity, component, extraLabels, labelsConfig } = opts;
-    const collected: string[] = [];
+  const { rawSlackText, severity, component, extraLabels, labelsConfig } = opts;
+  const collected: string[] = [];
 
-    // 1. Keyword matching (case-insensitive, pipe-separated synonyms)
-    for (const [pattern, labels] of Object.entries(labelsConfig.keywords ?? {})) {
-        const regex = new RegExp(pattern, 'i');
-        if (regex.test(rawSlackText)) {
-            collected.push(...labels);
-        }
+  // 1. Keyword matching (case-insensitive, pipe-separated synonyms)
+  for (const [pattern, labels] of Object.entries(labelsConfig.keywords ?? {})) {
+    const regex = new RegExp(pattern, 'i');
+    if (regex.test(rawSlackText)) {
+      collected.push(...labels);
     }
+  }
 
-    // 2. Severity mapping
-    const severityLabels = labelsConfig.severity?.[severity] ?? [];
-    collected.push(...severityLabels);
+  // 2. Severity mapping
+  const severityLabels = labelsConfig.severity?.[severity] ?? [];
+  collected.push(...severityLabels);
 
-    // 3. Component mapping
-    if (component) {
-        const componentLabels = labelsConfig.components?.[component] ?? [];
-        collected.push(...componentLabels);
-    }
+  // 3. Component mapping
+  if (component) {
+    const componentLabels = labelsConfig.components?.[component] ?? [];
+    collected.push(...componentLabels);
+  }
 
-    // 4. Extra --labels flag
-    collected.push(...extraLabels);
+  // 4. Extra --labels flag
+  collected.push(...extraLabels);
 
-    // Deduplicate maintaining first-seen order
-    return [...new Set(collected)];
+  // Deduplicate maintaining first-seen order
+  return [...new Set(collected)];
 }
 
 /**
@@ -174,39 +191,37 @@ export function resolveLabels(opts: LabelResolutionOptions): string[] {
  * Never auto-creates labels.
  */
 export async function filterExistingLabels(
-    labels: string[],
-    owner: string,
-    repo: string,
-    token: string
+  labels: string[],
+  owner: string,
+  repo: string,
+  token: string
 ): Promise<string[]> {
-    if (labels.length === 0) return [];
+  if (labels.length === 0) return [];
 
-    // Fetch all labels in the repo (paginated, up to 100)
-    const { status, data } = await githubRequest(
-        'GET',
-        `/repos/${owner}/${repo}/labels?per_page=100`,
-        token
-    );
+  // Fetch all labels in the repo (paginated, up to 100)
+  const { status, data } = await githubRequest(
+    'GET',
+    `/repos/${owner}/${repo}/labels?per_page=100`,
+    token
+  );
 
-    if (status !== 200) {
-        // If we can't fetch labels (e.g. permissions), skip filtering
-        return labels;
+  if (status !== 200) {
+    // If we can't fetch labels (e.g. permissions), skip filtering
+    return labels;
+  }
+
+  const repoLabels = new Set(((data as any[]) ?? []).map((l) => (l.name as string).toLowerCase()));
+
+  const valid: string[] = [];
+  for (const label of labels) {
+    if (repoLabels.has(label.toLowerCase())) {
+      valid.push(label);
+    } else {
+      process.stdout.write(`⚠  Label '${label}' not found in repo. Skipping.\n`);
     }
+  }
 
-    const repoLabels = new Set(
-        ((data as any[]) ?? []).map((l) => (l.name as string).toLowerCase())
-    );
-
-    const valid: string[] = [];
-    for (const label of labels) {
-        if (repoLabels.has(label.toLowerCase())) {
-            valid.push(label);
-        } else {
-            process.stdout.write(`⚠  Label '${label}' not found in repo. Skipping.\n`);
-        }
-    }
-
-    return valid;
+  return valid;
 }
 
 // ─── Issue Creation (PRD §11.1) ───────────────────────────────────────────────
@@ -216,121 +231,124 @@ export async function filterExistingLabels(
  * Adapts structure based on issue_type (PRD §9.5).
  */
 export function assembleIssueBody(
-    ai: CreateAIOutput,
-    severity: string,
-    component: string | null,
-    slackUrl: string
+  ai: CreateAIOutput,
+  severity: string,
+  component: string | null,
+  slackUrl: string
 ): string {
-    const sections: string[] = [];
-    const isBug = ai.issue_type === 'bug_report';
+  const sections: string[] = [];
+  const isBug = ai.issue_type === 'bug_report';
 
-    if (ai.summary) sections.push(`## Summary\n${ai.summary}`);
+  if (ai.summary) sections.push(`## Summary\n${ai.summary}`);
 
-    if (ai.details) sections.push(`## Details\n${ai.details}`);
+  if (ai.details) sections.push(`## Details\n${ai.details}`);
 
-    // Bug-specific sections
-    if (isBug) {
-        if (ai.steps_to_reproduce) sections.push(`## Steps to Reproduce\n${ai.steps_to_reproduce}`);
-        if (ai.expected_behavior) sections.push(`## Expected Behavior\n${ai.expected_behavior}`);
-        if (ai.actual_behavior) sections.push(`## Actual Behavior\n${ai.actual_behavior}`);
-    }
+  // Bug-specific sections
+  if (isBug) {
+    if (ai.steps_to_reproduce) sections.push(`## Steps to Reproduce\n${ai.steps_to_reproduce}`);
+    if (ai.expected_behavior) sections.push(`## Expected Behavior\n${ai.expected_behavior}`);
+    if (ai.actual_behavior) sections.push(`## Actual Behavior\n${ai.actual_behavior}`);
+  }
 
-    // Screenshot note — simple Slack link, no downloads or broken data URLs
-    if (ai.has_screenshot) {
-        sections.push(`## Screenshot\n> 📸 A screenshot was shared in the original Slack message. [View in Slack](${slackUrl})`);
-    }
+  // Screenshot note — simple Slack link, no downloads or broken data URLs
+  if (ai.has_screenshot) {
+    sections.push(
+      `## Screenshot\n> 📸 A screenshot was shared in the original Slack message. [View in Slack](${slackUrl})`
+    );
+  }
 
-    sections.push(`## Severity\n${severity}`);
-    if (component) sections.push(`## Component\n${component}`);
+  sections.push(`## Severity\n${severity}`);
+  if (component) sections.push(`## Component\n${component}`);
 
-    sections.push(`---\n**Type:** ${formatIssueType(ai.issue_type)}  \n**Slack Thread:** ${slackUrl}`);
+  sections.push(
+    `---\n**Type:** ${formatIssueType(ai.issue_type)}  \n**Slack Thread:** ${slackUrl}`
+  );
 
-    return sections.join('\n\n');
+  return sections.join('\n\n');
 }
 
 function formatIssueType(type: string): string {
-    const map: Record<string, string> = {
-        bug_report: 'Bug Report',
-        data_request: 'Data Request',
-        account_management: 'Account Management',
-        billing_issue: 'Billing Issue',
-        configuration_change: 'Configuration Change',
-        access_issue: 'Access Issue',
-        investigation: 'Investigation',
-        feature_request: 'Feature Request',
-        general: 'General',
-    };
-    return map[type] ?? type;
+  const map: Record<string, string> = {
+    bug_report: 'Bug Report',
+    data_request: 'Data Request',
+    account_management: 'Account Management',
+    billing_issue: 'Billing Issue',
+    configuration_change: 'Configuration Change',
+    access_issue: 'Access Issue',
+    investigation: 'Investigation',
+    feature_request: 'Feature Request',
+    general: 'General',
+  };
+  return map[type] ?? type;
 }
 
 /**
  * Creates a GitHub issue via REST API.
  */
 export async function createIssue(
-    owner: string,
-    repo: string,
-    title: string,
-    body: string,
-    labels: string[],
-    token: string
+  owner: string,
+  repo: string,
+  title: string,
+  body: string,
+  labels: string[],
+  token: string
 ): Promise<CreatedIssue> {
-    const { status, data } = await githubRequest(
-        'POST',
-        `/repos/${owner}/${repo}/issues`,
-        token,
-        { title, body, labels }
-    );
+  const { status, data } = await githubRequest('POST', `/repos/${owner}/${repo}/issues`, token, {
+    title,
+    body,
+    labels,
+  });
 
-    handleGitHubError(status, data, 'issue creation');
+  handleGitHubError(status, data, 'issue creation');
 
-    const issue = data as any;
-    return {
-        number: issue.number,
-        url: issue.html_url,
-        nodeId: issue.node_id,
-    };
+  const issue = data as any;
+  return {
+    number: issue.number,
+    url: issue.html_url,
+    nodeId: issue.node_id,
+  };
 }
 
 /**
  * Fetches the body of an existing issue (for `update`).
  */
 export async function fetchIssueBody(
-    owner: string,
-    repo: string,
-    issueNumber: number,
-    token: string
+  owner: string,
+  repo: string,
+  issueNumber: number,
+  token: string
 ): Promise<string> {
-    const { status, data } = await githubRequest(
-        'GET',
-        `/repos/${owner}/${repo}/issues/${issueNumber}`,
-        token
-    );
+  const { status, data } = await githubRequest(
+    'GET',
+    `/repos/${owner}/${repo}/issues/${issueNumber}`,
+    token
+  );
 
-    handleGitHubError(status, data, `issue #${issueNumber} fetch`);
-    return (data as any).body ?? '';
+  handleGitHubError(status, data, `issue #${issueNumber} fetch`);
+  return (data as any).body ?? '';
 }
 
 /**
  * Appends text to an existing issue body.
  */
 export async function appendToIssueBody(
-    owner: string,
-    repo: string,
-    issueNumber: number,
-    appendText: string,
-    currentBody: string,
-    token: string
+  owner: string,
+  repo: string,
+  issueNumber: number,
+  appendText: string,
+  currentBody: string,
+  token: string
 ): Promise<string> {
-    const newBody = `${currentBody}\n\n---\n\n${appendText}`;
-    const { status, data } = await githubRequest(
-        'PATCH',
-        `/repos/${owner}/${repo}/issues/${issueNumber}`,
-        token,
-        { body: newBody }
-    );
+  const newBody = `${currentBody}\n\n---\n\n${appendText}`;
+  const { status, data } = await githubRequest(
+    'PATCH',
+    `/repos/${owner}/${repo}/issues/${issueNumber}`,
+    token,
+    { body: newBody }
+  );
 
-    handleGitHubError(status, data, `issue #${issueNumber} update`);
-    return (data as any).html_url;
+  handleGitHubError(status, data, `issue #${issueNumber} update`);
+  return (data as any).html_url;
 }
 
 // ─── Image Attachment (PRD §11.3) ─────────────────────────────────────────────
@@ -345,41 +363,43 @@ export async function appendToIssueBody(
  * and renders as a broken image. Posting the path is the only reliable approach.
  */
 export async function postImageComment(
-    owner: string,
-    repo: string,
-    issueNumber: number,
-    imagePath: string,
-    filename: string,
-    token: string
+  owner: string,
+  repo: string,
+  issueNumber: number,
+  imagePath: string,
+  filename: string,
+  token: string
 ): Promise<void> {
-    const lines = [
-        `### 📎 Screenshot from Slack`,
-        ``,
-        `A screenshot was extracted from the Slack thread and saved to your local machine:`,
-        ``,
-        `\`\`\``,
-        `${imagePath}`,
-        `\`\`\``,
-        ``,
-        `**To attach it to this issue:**`,
-        `1. Open this issue in your browser`,
-        `2. Click **Edit** on the issue body (pencil icon)`,
-        `3. Drag-and-drop the file above into the editor area`,
-        `4. Replace the placeholder in the **Screenshot** section with the uploaded image`,
-    ];
-    const body = lines.join('\n');
+  const lines = [
+    `### 📎 Screenshot from Slack`,
+    ``,
+    `A screenshot was extracted from the Slack thread and saved to your local machine:`,
+    ``,
+    `\`\`\``,
+    `${imagePath}`,
+    `\`\`\``,
+    ``,
+    `**To attach it to this issue:**`,
+    `1. Open this issue in your browser`,
+    `2. Click **Edit** on the issue body (pencil icon)`,
+    `3. Drag-and-drop the file above into the editor area`,
+    `4. Replace the placeholder in the **Screenshot** section with the uploaded image`,
+  ];
+  const body = lines.join('\n');
 
-    const { status } = await githubRequest(
-        'POST',
-        `/repos/${owner}/${repo}/issues/${issueNumber}/comments`,
-        token,
-        { body }
+  const { status } = await githubRequest(
+    'POST',
+    `/repos/${owner}/${repo}/issues/${issueNumber}/comments`,
+    token,
+    { body }
+  );
+
+  if (status >= 400) {
+    process.stdout.write(
+      `⚠  Could not post image instructions. Your image is saved at: ${imagePath}\n`
     );
-
-    if (status >= 400) {
-        process.stdout.write(`⚠  Could not post image instructions. Your image is saved at: ${imagePath}\n`);
-    }
-    // NOTE: Do NOT delete the temp file — the user still needs it to upload manually.
+  }
+  // NOTE: Do NOT delete the temp file — the user still needs it to upload manually.
 }
 
 // ─── GitHub Project v2 Assignment (PRD §11.4) ─────────────────────────────────
@@ -389,36 +409,36 @@ export async function postImageComment(
  * Any failure prints a warning and returns; it never throws or aborts the issue.
  */
 export async function addToProject(
-    projectId: string,
-    issueNodeId: string,
-    token: string
+  projectId: string,
+  issueNodeId: string,
+  token: string
 ): Promise<void> {
-    try {
-        // Step 1: Add item to project
-        const addResult = await githubGraphQL(
-            `mutation AddItem($projectId: ID!, $contentId: ID!) {
+  try {
+    // Step 1: Add item to project
+    const addResult = (await githubGraphQL(
+      `mutation AddItem($projectId: ID!, $contentId: ID!) {
         addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
           item { id }
         }
       }`,
-            { projectId, contentId: issueNodeId },
-            token
-        ) as any;
+      { projectId, contentId: issueNodeId },
+      token
+    )) as any;
 
-        if (addResult?.errors) {
-            process.stdout.write(`⚠  Could not add to project. Issue was still created.\n`);
-            return;
-        }
+    if (addResult?.errors) {
+      process.stdout.write(`⚠  Could not add to project. Issue was still created.\n`);
+      return;
+    }
 
-        const itemId = addResult?.data?.addProjectV2ItemById?.item?.id;
-        if (!itemId) {
-            process.stdout.write(`⚠  Could not add to project. Issue was still created.\n`);
-            return;
-        }
+    const itemId = addResult?.data?.addProjectV2ItemById?.item?.id;
+    if (!itemId) {
+      process.stdout.write(`⚠  Could not add to project. Issue was still created.\n`);
+      return;
+    }
 
-        // Step 2: Find the "Status" field and "Todo" option
-        const projectResult = await githubGraphQL(
-            `query GetProject($projectId: ID!) {
+    // Step 2: Find the "Status" field and "Todo" option
+    const projectResult = (await githubGraphQL(
+      `query GetProject($projectId: ID!) {
         node(id: $projectId) {
           ... on ProjectV2 {
             fields(first: 20) {
@@ -432,22 +452,20 @@ export async function addToProject(
           }
         }
       }`,
-            { projectId },
-            token
-        ) as any;
+      { projectId },
+      token
+    )) as any;
 
-        const fields: any[] = projectResult?.data?.node?.fields?.nodes ?? [];
-        const statusField = fields.find((f: any) => f.name === 'Status');
-        if (!statusField) return; // No status field — skip, don't error
+    const fields: any[] = projectResult?.data?.node?.fields?.nodes ?? [];
+    const statusField = fields.find((f: any) => f.name === 'Status');
+    if (!statusField) return; // No status field — skip, don't error
 
-        const todoOption = statusField.options?.find(
-            (o: any) => o.name?.toLowerCase() === 'todo'
-        );
-        if (!todoOption) return;
+    const todoOption = statusField.options?.find((o: any) => o.name?.toLowerCase() === 'todo');
+    if (!todoOption) return;
 
-        // Step 3: Set status to Todo
-        await githubGraphQL(
-            `mutation SetStatus($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
+    // Step 3: Set status to Todo
+    await githubGraphQL(
+      `mutation SetStatus($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
         updateProjectV2ItemFieldValue(input: {
           projectId: $projectId
           itemId: $itemId
@@ -455,35 +473,35 @@ export async function addToProject(
           value: { singleSelectOptionId: $optionId }
         }) { projectV2Item { id } }
       }`,
-            {
-                projectId,
-                itemId,
-                fieldId: statusField.id,
-                optionId: todoOption.id,
-            },
-            token
-        );
-    } catch {
-        process.stdout.write(`⚠  Could not add to project. Issue was still created.\n`);
-    }
+      {
+        projectId,
+        itemId,
+        fieldId: statusField.id,
+        optionId: todoOption.id,
+      },
+      token
+    );
+  } catch {
+    process.stdout.write(`⚠  Could not add to project. Issue was still created.\n`);
+  }
 }
 
 // ─── Post comment (for update --comment mode) ─────────────────────────────────
 
 export async function postIssueComment(
-    owner: string,
-    repo: string,
-    issueNumber: number,
-    body: string,
-    token: string
+  owner: string,
+  repo: string,
+  issueNumber: number,
+  body: string,
+  token: string
 ): Promise<string> {
-    const { status, data } = await githubRequest(
-        'POST',
-        `/repos/${owner}/${repo}/issues/${issueNumber}/comments`,
-        token,
-        { body }
-    );
+  const { status, data } = await githubRequest(
+    'POST',
+    `/repos/${owner}/${repo}/issues/${issueNumber}/comments`,
+    token,
+    { body }
+  );
 
-    handleGitHubError(status, data, `comment on issue #${issueNumber}`);
-    return `https://github.com/${owner}/${repo}/issues/${issueNumber}`;
+  handleGitHubError(status, data, `comment on issue #${issueNumber}`);
+  return `https://github.com/${owner}/${repo}/issues/${issueNumber}`;
 }
