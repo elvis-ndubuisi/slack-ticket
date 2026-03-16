@@ -8,45 +8,45 @@
  * - Image downloading to OS temp directory
  */
 
-import https from 'https';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
-import { CLIError } from './error.js';
+import https from 'https'
+import fs from 'fs'
+import path from 'path'
+import os from 'os'
+import { CLIError } from './error.js'
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
 export interface SlackFile {
-  id: string;
-  name: string;
-  mimetype: string;
-  url_private: string;
+  id: string
+  name: string
+  mimetype: string
+  url_private: string
 }
 
 export interface SlackMessage {
-  ts: string;
-  text: string;
-  files?: SlackFile[];
+  ts: string
+  text: string
+  files?: SlackFile[]
 }
 
 export interface ParsedSlackUrl {
-  channelId: string;
-  timestamp: string;
+  channelId: string
+  timestamp: string
   /** The original URL, used as the thread link in issue footer */
-  originalUrl: string;
+  originalUrl: string
 }
 
 export interface DownloadedImage {
-  filePath: string;
-  filename: string;
+  filePath: string
+  filename: string
 }
 
 export interface FetchThreadResult {
-  messages: SlackMessage[];
+  messages: SlackMessage[]
   imageInfo: {
     downloaded: DownloadedImage | null;
     totalCount: number;
-  };
+  }
 }
 
 // ─── URL Parsing ───────────────────────────────────────────────────────────────
@@ -61,43 +61,43 @@ export interface FetchThreadResult {
  *   p1739828340001200 → strip 'p' → insert '.' after 10th digit → 1739828340.001200
  */
 export function parseSlackUrl(url: string): ParsedSlackUrl {
-  let parsed: URL;
+  let parsed: URL
   try {
-    parsed = new URL(url);
+    parsed = new URL(url)
   } catch {
-    throwUrlError(url);
+    throwUrlError(url)
   }
 
   // Must be a slack.com domain
   if (!parsed!.hostname.endsWith('slack.com')) {
-    throwUrlError(url);
+    throwUrlError(url)
   }
 
   // Path format: /archives/{channelId}/{pTimestamp}
-  const match = parsed!.pathname.match(/^\/archives\/([A-Z0-9]+)\/(p\d+)$/i);
+  const match = parsed!.pathname.match(/^\/archives\/([A-Z0-9]+)\/(p\d+)$/i)
   if (!match) {
-    throwUrlError(url);
+    throwUrlError(url)
   }
 
-  const [, channelId, pTimestamp] = match!;
+  const [, channelId, pTimestamp] = match!
 
   // Convert pTimestamp → slack ts
   // e.g. p1739828340001200 → strip 'p' → 1739828340001200 → 1739828340.001200
-  const digits = pTimestamp.slice(1); // remove 'p'
+  const digits = pTimestamp.slice(1) // remove 'p'
   if (digits.length < 11) {
-    throwUrlError(url);
+    throwUrlError(url)
   }
-  const timestamp = `${digits.slice(0, 10)}.${digits.slice(10)}`;
+  const timestamp = `${digits.slice(0, 10)}.${digits.slice(10)}`
 
-  return { channelId, timestamp, originalUrl: url };
+  return { channelId, timestamp, originalUrl: url }
 }
 
 function throwUrlError(url: string): never {
   const err = new Error(
     `Invalid Slack URL: ${url}\nExpected format: https://workspace.slack.com/archives/<channel-id>/p<timestamp>`
   );
-  (err as any).exitCode = 1;
-  throw err;
+  (err as any).exitCode = 1
+  throw err
 }
 
 // ─── HTTP helper ───────────────────────────────────────────────────────────────
@@ -112,8 +112,8 @@ export async function slackGet(
 ): Promise<any> {
   const query = new URLSearchParams(
     Object.fromEntries(Object.entries(params).map(([k, v]) => [k, String(v)]))
-  ).toString();
-  const url = `https://slack.com/api/${method}?${query}`;
+  ).toString()
+  const url = `https://slack.com/api/${method}?${query}`
 
   return new Promise((resolve, reject) => {
     const req = https.request(
@@ -126,20 +126,20 @@ export async function slackGet(
         },
       },
       (res) => {
-        let data = '';
-        res.on('data', (chunk) => (data += chunk));
+        let data = ''
+        res.on('data', (chunk) => (data += chunk))
         res.on('end', () => {
           try {
-            resolve(JSON.parse(data));
+            resolve(JSON.parse(data))
           } catch {
-            reject(new Error(`Failed to parse Slack API response for ${method}`));
+            reject(new Error(`Failed to parse Slack API response for ${method}`))
           }
-        });
+        })
       }
-    );
-    req.on('error', reject);
-    req.end();
-  });
+    )
+    req.on('error', reject)
+    req.end()
+  })
 }
 
 // ─── Error helpers ─────────────────────────────────────────────────────────────
@@ -149,34 +149,34 @@ export async function slackGet(
  * Throws a CLIError with exit code 2.
  */
 function handleSlackError(response: any, contextInfo: string): void {
-  if (response.ok) return;
+  if (response.ok) return
 
-  const error = response.error as string;
-  const detail = response.detail as string | undefined;
+  const error = response.error as string
+  const detail = response.detail as string | undefined
 
   if (error === 'not_in_channel' || error === 'channel_not_found') {
-    const channelName = detail ?? 'the channel';
+    const channelName = detail ?? 'the channel'
     throw new CLIError(
       `Bot not in channel. Invite the bot to ${channelName} first, then retry.`,
       2
-    );
+    )
   }
 
   if (error === 'ratelimited') {
     const retryAfter =
-      response.headers?.['retry-after'] ?? response.response_metadata?.retry_after ?? 'a few';
-    throw new CLIError(`Slack rate limited. Retry after ${retryAfter} seconds.`, 2);
+      response.headers?.['retry-after'] ?? response.response_metadata?.retry_after ?? 'a few'
+    throw new CLIError(`Slack rate limited. Retry after ${retryAfter} seconds.`, 2)
   }
 
   if (error === 'invalid_auth' || error === 'token_revoked' || error === 'not_authed') {
-    throw new CLIError(`Slack token validation failed (${error}). Check your bot token.`, 2);
+    throw new CLIError(`Slack token validation failed (${error}). Check your bot token.`, 2)
   }
 
   if (error === 'message_not_found' || error === 'thread_not_found') {
-    throw new CLIError(`Slack ${contextInfo} not found. Verify the URL is correct.`, 2);
+    throw new CLIError(`Slack ${contextInfo} not found. Verify the URL is correct.`, 2)
   }
 
-  throw new CLIError(`Slack API Error during ${contextInfo}: ${error || 'Unknown error'}`, 2);
+  throw new CLIError(`Slack API Error during ${contextInfo}: ${error || 'Unknown error'}`, 2)
 }
 
 // ─── Thread Fetching (for `create`) ───────────────────────────────────────────
@@ -202,31 +202,31 @@ export async function fetchThread(
       inclusive: 'true',
     },
     token
-  );
+  )
 
-  handleSlackError(response, 'thread fetch');
+  handleSlackError(response, 'thread fetch')
 
-  const messages: SlackMessage[] = (response.messages ?? []).slice(0, depth);
+  const messages: SlackMessage[] = (response.messages ?? []).slice(0, depth)
 
-  let downloaded: DownloadedImage | null = null;
-  let totalCount = 0;
+  let downloaded: DownloadedImage | null = null
+  let totalCount = 0
 
   if (imageHandling) {
     // Collect all images across all fetched messages
-    const images: SlackFile[] = [];
+    const images: SlackFile[] = []
     for (const msg of messages) {
       if (msg.files) {
-        images.push(...msg.files.filter((f) => f.mimetype?.startsWith('image/')));
+        images.push(...msg.files.filter((f) => f.mimetype?.startsWith('image/')))
       }
     }
-    totalCount = images.length;
+    totalCount = images.length
 
     if (images.length > 0) {
-      downloaded = await downloadImage(images[0], token);
+      downloaded = await downloadImage(images[0], token)
     }
   }
 
-  return { messages, imageInfo: { downloaded, totalCount } };
+  return { messages, imageInfo: { downloaded, totalCount } }
 }
 
 // ─── Single Message Fetching (for `update`) ───────────────────────────────────
@@ -250,18 +250,18 @@ export async function fetchSingleMessage(
       limit: 1,
     },
     token
-  );
+  )
 
-  handleSlackError(response, 'message fetch');
+  handleSlackError(response, 'message fetch')
 
-  const messages: SlackMessage[] = response.messages ?? [];
+  const messages: SlackMessage[] = response.messages ?? []
   if (messages.length === 0) {
     const err = new Error(`Slack message not found. Verify the URL is correct.`);
-    (err as any).exitCode = 2;
-    throw err;
+    (err as any).exitCode = 2
+    throw err
   }
 
-  return messages[0];
+  return messages[0]
 }
 
 // ─── Image Downloading ─────────────────────────────────────────────────────────
@@ -271,9 +271,9 @@ export async function fetchSingleMessage(
  * Returns the local file path, or null on failure (caller should warn and continue).
  */
 async function downloadImage(file: SlackFile, token: string): Promise<DownloadedImage | null> {
-  const tempDir = os.tmpdir();
-  const filename = `slack-ticket-${file.id}-${file.name}`;
-  const filePath = path.join(tempDir, filename);
+  const tempDir = os.tmpdir()
+  const filename = `slack-ticket-${file.id}-${file.name}`
+  const filePath = path.join(tempDir, filename)
 
   return new Promise((resolve) => {
     const req = https.request(
@@ -285,35 +285,35 @@ async function downloadImage(file: SlackFile, token: string): Promise<Downloaded
       (res) => {
         // Follow redirect if needed
         if (res.statusCode === 302 || res.statusCode === 301) {
-          const location = res.headers.location;
+          const location = res.headers.location
           if (location) {
             // Re-download from redirect location (without auth header)
             const redir = https.request(location, { method: 'GET' }, (rRes) => {
-              const out = fs.createWriteStream(filePath);
-              rRes.pipe(out);
-              out.on('finish', () => resolve({ filePath, filename }));
-              out.on('error', () => resolve(null));
-            });
-            redir.on('error', () => resolve(null));
-            redir.end();
-            return;
+              const out = fs.createWriteStream(filePath)
+              rRes.pipe(out)
+              out.on('finish', () => resolve({ filePath, filename }))
+              out.on('error', () => resolve(null))
+            })
+            redir.on('error', () => resolve(null))
+            redir.end()
+            return
           }
         }
 
         if (res.statusCode !== 200) {
-          resolve(null);
-          return;
+          resolve(null)
+          return
         }
 
-        const out = fs.createWriteStream(filePath);
-        res.pipe(out);
-        out.on('finish', () => resolve({ filePath, filename }));
-        out.on('error', () => resolve(null));
+        const out = fs.createWriteStream(filePath)
+        res.pipe(out)
+        out.on('finish', () => resolve({ filePath, filename }))
+        out.on('error', () => resolve(null))
       }
-    );
-    req.on('error', () => resolve(null));
-    req.end();
-  });
+    )
+    req.on('error', () => resolve(null))
+    req.end()
+  })
 }
 
 // ─── Text Extraction ───────────────────────────────────────────────────────────
@@ -326,5 +326,5 @@ export function combineMessageText(messages: SlackMessage[]): string {
   return messages
     .map((m) => m.text?.trim())
     .filter(Boolean)
-    .join('\n\n');
+    .join('\n\n')
 }

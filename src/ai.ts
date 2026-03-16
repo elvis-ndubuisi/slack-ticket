@@ -7,27 +7,27 @@
  * - Response parsing and validation with retry + field stripping
  */
 
-import https from 'https';
-import http from 'http';
-import { CLIError } from './error.js';
-import type { AIConfig } from './config.js';
+import https from 'https'
+import http from 'http'
+import { CLIError } from './error.js'
+import type { AIConfig } from './config.js'
 
 // ─── AI Output Types ───────────────────────────────────────────────────────────
 
 export interface CreateAIOutput {
-  title: string;
-  issue_type: string;
-  summary: string | null;
-  details: string | null;
-  steps_to_reproduce: string | null;
-  expected_behavior: string | null;
-  actual_behavior: string | null;
-  has_screenshot: boolean;
+  title: string
+  issue_type: string
+  summary: string | null
+  details: string | null
+  steps_to_reproduce: string | null
+  expected_behavior: string | null
+  actual_behavior: string | null
+  has_screenshot: boolean
 }
 
 export interface UpdateAIOutput {
-  update_summary: string | null;
-  new_information: string | null;
+  update_summary: string | null
+  new_information: string | null
 }
 
 // ─── Prompt Templates (PRD §9.3) ──────────────────────────────────────────────
@@ -71,7 +71,7 @@ Rules:
 Slack Thread:
 ---
 ${threadText}
----`;
+---`
 }
 
 function buildUpdatePrompt(existingBody: string, newText: string): string {
@@ -98,7 +98,7 @@ ${existingBody}
 New Slack Messages:
 ---
 ${newText}
----`;
+---`
 }
 
 // ─── Core callAI() ─────────────────────────────────────────────────────────────
@@ -109,10 +109,10 @@ ${newText}
  * Returns the raw text response from the AI model.
  */
 export async function callAI(prompt: string, config: AIConfig): Promise<string> {
-  const { provider, baseUrl, apiKey, model, timeoutMs } = config;
+  const { provider, baseUrl, apiKey, model, timeoutMs } = config
 
-  const isAnthropic = provider === 'anthropic';
-  const endpoint = isAnthropic ? `${baseUrl}/v1/messages` : `${baseUrl}/chat/completions`;
+  const isAnthropic = provider === 'anthropic'
+  const endpoint = isAnthropic ? `${baseUrl}/v1/messages` : `${baseUrl}/chat/completions`
 
   const body = isAnthropic
     ? JSON.stringify({
@@ -124,44 +124,44 @@ export async function callAI(prompt: string, config: AIConfig): Promise<string> 
         model,
         messages: [{ role: 'user', content: prompt }],
         max_tokens: 2048,
-      });
+      })
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     'Content-Length': String(Buffer.byteLength(body)),
-  };
-
-  if (isAnthropic) {
-    headers['x-api-key'] = apiKey;
-    headers['anthropic-version'] = '2023-06-01';
-  } else {
-    headers['Authorization'] = `Bearer ${apiKey}`;
   }
 
-  const rawResponse = await makeRequest(endpoint, headers, body, timeoutMs);
+  if (isAnthropic) {
+    headers['x-api-key'] = apiKey
+    headers['anthropic-version'] = '2023-06-01'
+  } else {
+    headers['Authorization'] = `Bearer ${apiKey}`
+  }
+
+  const rawResponse = await makeRequest(endpoint, headers, body, timeoutMs)
 
   // Extract text from response based on provider format
-  let content: string;
+  let content: string
   try {
-    const parsed = JSON.parse(rawResponse);
+    const parsed = JSON.parse(rawResponse)
     if (isAnthropic) {
       // Anthropic: { content: [{ type: 'text', text: '...' }] }
-      content = parsed?.content?.[0]?.text ?? '';
+      content = parsed?.content?.[0]?.text ?? ''
     } else {
       // OpenAI-compatible: { choices: [{ message: { content: '...' } }] }
-      content = parsed?.choices?.[0]?.message?.content ?? '';
+      content = parsed?.choices?.[0]?.message?.content ?? ''
     }
   } catch {
-    throw new CLIError(`AI provider returned non-JSON response. Check your AI configuration.`, 3);
+    throw new CLIError(`AI provider returned non-JSON response. Check your AI configuration.`, 3)
   }
 
   if (!content) {
     const err = new Error(`AI provider returned an empty response.`);
-    (err as any).exitCode = 3;
-    throw err;
+    (err as any).exitCode = 3
+    throw err
   }
 
-  return content;
+  return content
 }
 
 function makeRequest(
@@ -171,9 +171,9 @@ function makeRequest(
   timeoutMs: number
 ): Promise<string> {
   return new Promise((resolve, reject) => {
-    const url = new URL(endpoint);
-    const isHttps = url.protocol === 'https:';
-    const transport = isHttps ? https : http;
+    const url = new URL(endpoint)
+    const isHttps = url.protocol === 'https:'
+    const transport = isHttps ? https : http
 
     const req = transport.request(
       {
@@ -184,91 +184,91 @@ function makeRequest(
         headers,
       },
       (res) => {
-        let data = '';
-        res.on('data', (chunk) => (data += chunk));
+        let data = ''
+        res.on('data', (chunk) => (data += chunk))
         res.on('end', () => {
           if (res.statusCode === 401 || res.statusCode === 403) {
             const err = new Error(
               `AI API authentication failed (HTTP ${res.statusCode}). Check your API key.`
             );
-            (err as any).exitCode = 3;
-            reject(err);
-            return;
+            (err as any).exitCode = 3
+            reject(err)
+            return
           }
           if (res.statusCode && res.statusCode >= 400) {
             if (res.statusCode === 429) {
-              reject(new CLIError(`AI provider rate limited (HTTP 429). Try again later.`, 3));
+              reject(new CLIError(`AI provider rate limited (HTTP 429). Try again later.`, 3))
             } else if (res.statusCode === 401 || res.statusCode === 403) {
               reject(
                 new CLIError(
                   `AI provider authentication failed (HTTP ${res.statusCode}). Check your API key.`,
                   3
                 )
-              );
+              )
             } else {
-              reject(new CLIError(`AI provider returned HTTP ${res.statusCode}: ${data}`, 3));
+              reject(new CLIError(`AI provider returned HTTP ${res.statusCode}: ${data}`, 3))
             }
-            return;
+            return
           }
-          resolve(data);
-        });
+          resolve(data)
+        })
       }
-    );
+    )
 
     // Timeout handling
     const timer = setTimeout(() => {
-      req.destroy();
+      req.destroy()
       reject(
         new CLIError(
           `AI request timed out after ${timeoutMs}ms. Consider increasing 'ai.timeoutMs' in your config.`,
           3
         )
-      );
-    }, timeoutMs);
+      )
+    }, timeoutMs)
 
-    req.on('close', () => clearTimeout(timer));
+    req.on('close', () => clearTimeout(timer))
     req.on('error', (e) => {
-      clearTimeout(timer);
-      reject(new CLIError(`AI request failed: ${e.message}`, 3));
-    });
+      clearTimeout(timer)
+      reject(new CLIError(`AI request failed: ${e.message}`, 3))
+    })
 
-    req.write(body);
-    req.end();
-  });
+    req.write(body)
+    req.end()
+  })
 }
 
 // ─── Output Validation (PRD §9.4) ─────────────────────────────────────────────
 
-const FORBIDDEN_FIELDS_RE = /^(labels?|assignee|severity|milestone|project):/im;
+const FORBIDDEN_FIELDS_RE = /^(labels?|assignee|severity|milestone|project):/im
 
-const CREATE_REQUIRED_FIELDS: (keyof CreateAIOutput)[] = ['title', 'summary'];
-const UPDATE_REQUIRED_FIELDS: (keyof UpdateAIOutput)[] = ['update_summary', 'new_information'];
+const CREATE_REQUIRED_FIELDS: (keyof CreateAIOutput)[] = ['title', 'summary']
+const UPDATE_REQUIRED_FIELDS: (keyof UpdateAIOutput)[] = ['update_summary', 'new_information']
 
 function stripMarkdownFences(raw: string): string {
   return raw
     .replace(/^```(?:json)?\s*/i, '')
     .replace(/\s*```\s*$/, '')
-    .trim();
+    .trim()
 }
 
 function tryParse(raw: string): unknown | null {
   try {
-    return JSON.parse(raw);
+    return JSON.parse(raw)
   } catch {
-    return null;
+    return null
   }
 }
 
 function stripForbiddenContent(obj: Record<string, unknown>): Record<string, unknown> {
-  const cleaned: Record<string, unknown> = {};
+  const cleaned: Record<string, unknown> = {}
   for (const [key, value] of Object.entries(obj)) {
     if (typeof value === 'string' && FORBIDDEN_FIELDS_RE.test(value)) {
-      cleaned[key] = null;
+      cleaned[key] = null
     } else {
-      cleaned[key] = value;
+      cleaned[key] = value
     }
   }
-  return cleaned;
+  return cleaned
 }
 
 /**
@@ -286,28 +286,28 @@ export function parseCreateOutput(raw: string): CreateAIOutput {
     'expected_behavior',
     'actual_behavior',
     'has_screenshot',
-  ]);
+  ])
 
-  let parsed = tryParse(raw) ?? tryParse(stripMarkdownFences(raw));
+  let parsed = tryParse(raw) ?? tryParse(stripMarkdownFences(raw))
 
   if (!parsed || typeof parsed !== 'object') {
-    const msg = formatAIValidationError(raw);
-    throw new CLIError(msg, 4);
+    const msg = formatAIValidationError(raw)
+    throw new CLIError(msg, 4)
   }
 
-  let obj = parsed as Record<string, unknown>;
+  let obj = parsed as Record<string, unknown>
 
   // Strip disallowed keys
-  obj = Object.fromEntries(Object.entries(obj).filter(([k]) => ALLOWED_KEYS.has(k)));
+  obj = Object.fromEntries(Object.entries(obj).filter(([k]) => ALLOWED_KEYS.has(k)))
 
   // Strip forbidden content
-  obj = stripForbiddenContent(obj);
+  obj = stripForbiddenContent(obj)
 
   // Validate required fields
   for (const field of CREATE_REQUIRED_FIELDS) {
     if (obj[field] === undefined || obj[field] === '') {
-      const msg = formatAIValidationError(raw, `Required field '${field}' is missing or empty.`);
-      throw new CLIError(msg, 4);
+      const msg = formatAIValidationError(raw, `Required field '${field}' is missing or empty.`)
+      throw new CLIError(msg, 4)
     }
   }
 
@@ -320,40 +320,40 @@ export function parseCreateOutput(raw: string): CreateAIOutput {
     expected_behavior: (obj.expected_behavior as string | null) ?? null,
     actual_behavior: (obj.actual_behavior as string | null) ?? null,
     has_screenshot: Boolean(obj.has_screenshot ?? false),
-  };
+  }
 }
 
 /**
  * Parses and validates the AI response for the `update` command.
  */
 export function parseUpdateOutput(raw: string): UpdateAIOutput {
-  const ALLOWED_KEYS = new Set<string>(['update_summary', 'new_information']);
+  const ALLOWED_KEYS = new Set<string>(['update_summary', 'new_information'])
 
-  let parsed = tryParse(raw) ?? tryParse(stripMarkdownFences(raw));
+  let parsed = tryParse(raw) ?? tryParse(stripMarkdownFences(raw))
 
   if (!parsed || typeof parsed !== 'object') {
-    const msg = formatAIValidationError(raw);
-    throw new CLIError(msg, 4);
+    const msg = formatAIValidationError(raw)
+    throw new CLIError(msg, 4)
   }
 
-  let obj = parsed as Record<string, unknown>;
-  obj = Object.fromEntries(Object.entries(obj).filter(([k]) => ALLOWED_KEYS.has(k)));
-  obj = stripForbiddenContent(obj);
+  let obj = parsed as Record<string, unknown>
+  obj = Object.fromEntries(Object.entries(obj).filter(([k]) => ALLOWED_KEYS.has(k)))
+  obj = stripForbiddenContent(obj)
 
   for (const field of UPDATE_REQUIRED_FIELDS) {
     if (obj[field] === undefined) {
-      obj[field] = null;
+      obj[field] = null
     }
   }
 
   return {
     update_summary: (obj.update_summary as string | null) ?? null,
     new_information: (obj.new_information as string | null) ?? null,
-  };
+  }
 }
 
 function formatAIValidationError(raw: string, detail?: string): string {
-  return `AI output validation failed.${detail ? ' ' + detail : ''}\nRaw AI response:\n---\n${raw}\n---`;
+  return `AI output validation failed.${detail ? ' ' + detail : ''}\nRaw AI response:\n---\n${raw}\n---`
 }
 
 // ─── Public Convenience Functions ─────────────────────────────────────────────
@@ -365,9 +365,9 @@ export async function generateIssueFromThread(
   threadText: string,
   config: AIConfig
 ): Promise<CreateAIOutput> {
-  const prompt = buildCreatePrompt(threadText);
-  const raw = await callAI(prompt, config);
-  return parseCreateOutput(raw);
+  const prompt = buildCreatePrompt(threadText)
+  const raw = await callAI(prompt, config)
+  return parseCreateOutput(raw)
 }
 
 /**
@@ -378,7 +378,7 @@ export async function generateIssueUpdate(
   newText: string,
   config: AIConfig
 ): Promise<UpdateAIOutput> {
-  const prompt = buildUpdatePrompt(existingBody, newText);
-  const raw = await callAI(prompt, config);
-  return parseUpdateOutput(raw);
+  const prompt = buildUpdatePrompt(existingBody, newText)
+  const raw = await callAI(prompt, config)
+  return parseUpdateOutput(raw)
 }
