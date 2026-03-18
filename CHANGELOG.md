@@ -1,5 +1,12 @@
 # slack-ticket
 
+## 0.2.1
+
+### Patch Changes
+
+- eb832f9: Switch eslint & prettier to StandardTs
+- 9c94a42: Remove deprecated husky config
+
 ## 0.2.0
 
 ### Minor Changes
