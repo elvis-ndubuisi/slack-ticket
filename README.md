@@ -101,6 +101,11 @@ For a deep dive into every command, argument, and option available, refer to the
 | `update <#>` | Appends new Slack message content to an existing GitHub issue number. |
 | `doctor` | Runs a diagnostic suite to verify your Slack, GitHub, and AI connectivity. |
 | `config view` | Displays your current configuration with sensitive tokens safely masked. |
+| `learn <path-or-url>` | Learn team workflow rules from a Markdown file or URL. |
+| `unlearn` | Remove learned workflows and revert to default behavior. |
+| `workflow list` | List learned workflows on this machine. |
+| `workflow view <id-or-repo>` | View a learned workflow by ID or repo. |
+| `learn` + Project Fields | Supports setting Project v2 fields via `projectFields` in the workflow. |
 
 ---
 

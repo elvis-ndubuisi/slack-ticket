@@ -12,18 +12,23 @@ import {
   postImageComment,
   addToProject,
 } from '../github.js'
+import { getEffectiveConfigForRepo } from '../workflow.js'
 
 /**
  * create command implementation (PRD §8.2).
  */
 export async function runCreate(slackUrl: string, options: Record<string, any>): Promise<void> {
-  const config = readConfig()
+  const baseConfig = readConfig()
   const spinner = ora()
 
   // 1. Validate Slack URL
   const parsedUrl = parseSlackUrl(slackUrl)
 
-  // 2-4. Fetch thread, extract text, and collect images
+  // 2. Resolve repo + workflow (if any)
+  const [owner, repo] = resolveRepo(options.repo, baseConfig)
+  const { config, workflow } = getEffectiveConfigForRepo(owner, repo)
+
+  // 3-5. Fetch thread, extract text, and collect images
   spinner.start('Fetching Slack thread...')
   const depth = options.depth ? parseInt(options.depth, 10) : config.defaults.threadDepth
   const thread = await fetchThread(
@@ -36,7 +41,7 @@ export async function runCreate(slackUrl: string, options: Record<string, any>):
 
   const combinedText = combineMessageText(thread.messages)
 
-  // 5. Resolve labels
+  // 6. Resolve labels
   spinner.start('Resolving labels...')
   const severity = options.severity || config.defaults.severity
   const component = options.component || config.defaults.component
@@ -50,19 +55,34 @@ export async function runCreate(slackUrl: string, options: Record<string, any>):
     labelsConfig: config.labels,
   })
 
-  const [owner, repo] = resolveRepo(options.repo, config)
   labels = await filterExistingLabels(labels, owner, repo, config.github.token)
   spinner.succeed(`Resolved ${labels.length} labels.`)
 
-  // 6-7. AI generation and validation
+  // 7-8. AI generation and validation
   spinner.start('Generating issue content with AI...')
-  const aiOutput = await generateIssueFromThread(combinedText, config.ai)
+  const aiOutput = await generateIssueFromThread(combinedText, config.ai, workflow)
   spinner.succeed('AI content generated.')
 
   // 8. Assemble final body (issue_type-aware; screenshot reference handled via has_screenshot in AI output)
   const finalBody = assembleIssueBody(aiOutput, severity, component, slackUrl)
 
-  // 9. Display preview
+  // 9. Resolve project (workflow routing can override defaults)
+  let projectId = options.project || config.github.defaultProject
+  if (!options.project && workflow?.projectRouting?.length) {
+    for (const rule of workflow.projectRouting) {
+      try {
+        const re = new RegExp(rule.pattern, 'i')
+        if (re.test(combinedText)) {
+          projectId = rule.projectId
+          break
+        }
+      } catch {
+        // Ignore invalid regex patterns
+      }
+    }
+  }
+
+  // 10. Display preview
   printPreview({
     title: aiOutput.title,
     owner,
@@ -70,12 +90,12 @@ export async function runCreate(slackUrl: string, options: Record<string, any>):
     severity,
     component,
     labels,
-    projectId: options.project || config.github.defaultProject,
+    projectId,
     body: finalBody,
     imageInfo: thread.imageInfo,
   })
 
-  // 10. Confirmation
+  // 11. Confirmation
   if (!options.yes && !options.dryRun) {
     const ok = await confirm({
       message: 'Create this issue?',
@@ -87,13 +107,13 @@ export async function runCreate(slackUrl: string, options: Record<string, any>):
     }
   }
 
-  // 11. Dry-run?
+  // 12. Dry-run?
   if (options.dryRun) {
     console.log(chalk.cyan('\n[Dry run complete] No issue created.'))
     return
   }
 
-  // 12. Create issue
+  // 13. Create issue
   spinner.start('Creating GitHub issue...')
   const issue = await createIssue(
     owner,
@@ -105,7 +125,7 @@ export async function runCreate(slackUrl: string, options: Record<string, any>):
   )
   spinner.succeed(`Issue created: ${chalk.green(issue.url)}`)
 
-  // 13. Post image comment
+  // 14. Post image comment
   if (thread.imageInfo.downloaded) {
     spinner.start('Attaching image...')
     await postImageComment(
@@ -119,15 +139,14 @@ export async function runCreate(slackUrl: string, options: Record<string, any>):
     spinner.succeed('Image attached.')
   }
 
-  // 14. Add to Project
-  const projectId = options.project || config.github.defaultProject
+  // 15. Add to Project
   if (projectId && !options.noProject) {
     spinner.start('Adding to GitHub Project...')
-    await addToProject(projectId, issue.nodeId, config.github.token)
+    await addToProject(projectId, issue.nodeId, config.github.token, workflow?.projectFields)
     spinner.succeed('Added to project.')
   }
 
-  // 15. Final URL
+  // 16. Final URL
   console.log(`\n${chalk.bold('Success!')} Issue URL: ${chalk.cyan(issue.url)}`)
 }
 

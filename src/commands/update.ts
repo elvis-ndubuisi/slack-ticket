@@ -5,6 +5,7 @@ import { readConfig, Config } from '../config.js'
 import { parseSlackUrl, fetchSingleMessage } from '../slack.js'
 import { generateIssueUpdate } from '../ai.js'
 import { fetchIssueBody, appendToIssueBody, postIssueComment } from '../github.js'
+import { getEffectiveConfigForRepo } from '../workflow.js'
 
 /**
  * update command implementation (PRD §8.3).
@@ -14,7 +15,7 @@ export async function runUpdate(
   slackUrls: string[],
   options: Record<string, any>
 ): Promise<void> {
-  const config = readConfig()
+  const baseConfig = readConfig()
   const spinner = ora()
 
   if (isNaN(issueNumber) || issueNumber <= 0) {
@@ -23,7 +24,8 @@ export async function runUpdate(
   }
 
   // 1. Resolve repo
-  const [owner, repo] = resolveRepo(options.repo, config)
+  const [owner, repo] = resolveRepo(options.repo, baseConfig)
+  const { config, workflow } = getEffectiveConfigForRepo(owner, repo)
 
   // 2. Fetch existing issue body
   spinner.start(`Fetching issue #${issueNumber} from GitHub...`)
@@ -49,7 +51,7 @@ export async function runUpdate(
 
   // 4. Generate AI update
   spinner.start('Generating update content with AI...')
-  const aiOutput = await generateIssueUpdate(existingBody, combinedNewText, config.ai)
+  const aiOutput = await generateIssueUpdate(existingBody, combinedNewText, config.ai, workflow)
   spinner.succeed('Update content generated.')
 
   if (!aiOutput.update_summary && !aiOutput.new_information) {
