@@ -11,6 +11,7 @@ import https from 'https'
 import http from 'http'
 import { CLIError } from './error.js'
 import type { AIConfig } from './config.js'
+import type { LearnedWorkflow } from './workflow.js'
 
 // ─── AI Output Types ───────────────────────────────────────────────────────────
 
@@ -32,7 +33,8 @@ export interface UpdateAIOutput {
 
 // ─── Prompt Templates (PRD §9.3) ──────────────────────────────────────────────
 
-function buildCreatePrompt(threadText: string): string {
+function buildCreatePrompt(threadText: string, workflow?: LearnedWorkflow | null): string {
+  const workflowSection = buildWorkflowSection('create', workflow)
   return `You are a support ticket specialist. Your job is to convert a Slack conversation into a well-structured GitHub issue ticket.
 
 Return ONLY a valid JSON object. No markdown fences. No preamble. No commentary.
@@ -68,13 +70,20 @@ Rules:
 - Be neutral and professional — this ticket may be read by engineers, QA, or support staff
 - This tool is used across many companies and industries — do not assume specific domain knowledge
 
+${workflowSection}
+
 Slack Thread:
 ---
 ${threadText}
 ---`
 }
 
-function buildUpdatePrompt(existingBody: string, newText: string): string {
+function buildUpdatePrompt(
+  existingBody: string,
+  newText: string,
+  workflow?: LearnedWorkflow | null
+): string {
+  const workflowSection = buildWorkflowSection('update', workflow)
   return `You are a QA documentation specialist. A GitHub issue exists and new information has been shared in Slack. Generate a structured update.
 
 Return ONLY a valid JSON object. No markdown fences. No preamble. No commentary.
@@ -90,6 +99,8 @@ Rules:
 - Do NOT repeat information already present in the existing issue body
 - Set fields to null if there is nothing meaningful to add
 
+${workflowSection}
+
 Existing Issue Body:
 ---
 ${existingBody}
@@ -99,6 +110,20 @@ New Slack Messages:
 ---
 ${newText}
 ---`
+}
+
+function buildWorkflowSection(type: 'create' | 'update', workflow?: LearnedWorkflow | null): string {
+  if (!workflow) return ''
+  const parts: string[] = []
+  if (workflow.instructions) {
+    parts.push(`Team Workflow Rules:\n${workflow.instructions}`)
+  }
+  const extra = type === 'create' ? workflow.prompt?.create : workflow.prompt?.update
+  if (extra) {
+    parts.push(`Additional ${type} instructions:\n${extra}`)
+  }
+  if (parts.length === 0) return ''
+  return `\n${parts.join('\n\n')}\n`
 }
 
 // ─── Core callAI() ─────────────────────────────────────────────────────────────
@@ -363,9 +388,10 @@ function formatAIValidationError(raw: string, detail?: string): string {
  */
 export async function generateIssueFromThread(
   threadText: string,
-  config: AIConfig
+  config: AIConfig,
+  workflow?: LearnedWorkflow | null
 ): Promise<CreateAIOutput> {
-  const prompt = buildCreatePrompt(threadText)
+  const prompt = buildCreatePrompt(threadText, workflow)
   const raw = await callAI(prompt, config)
   return parseCreateOutput(raw)
 }
@@ -376,9 +402,10 @@ export async function generateIssueFromThread(
 export async function generateIssueUpdate(
   existingBody: string,
   newText: string,
-  config: AIConfig
+  config: AIConfig,
+  workflow?: LearnedWorkflow | null
 ): Promise<UpdateAIOutput> {
-  const prompt = buildUpdatePrompt(existingBody, newText)
+  const prompt = buildUpdatePrompt(existingBody, newText, workflow)
   const raw = await callAI(prompt, config)
   return parseUpdateOutput(raw)
 }

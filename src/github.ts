@@ -411,7 +411,8 @@ export async function postImageComment(
 export async function addToProject(
   projectId: string,
   issueNodeId: string,
-  token: string
+  token: string,
+  projectFields?: Record<string, string | number>
 ): Promise<void> {
   try {
     // Step 1: Add item to project
@@ -436,53 +437,148 @@ export async function addToProject(
       return
     }
 
-    // Step 2: Find the "Status" field and "Todo" option
-    const projectResult = (await githubGraphQL(
-      `query GetProject($projectId: ID!) {
-        node(id: $projectId) {
-          ... on ProjectV2 {
-            fields(first: 20) {
-              nodes {
-                ... on ProjectV2SingleSelectField {
-                  id name
-                  options { id name }
+    // Step 2: Apply project fields (best-effort)
+    const fieldUpdates = { ...projectFields }
+    if (!fieldUpdates || Object.keys(fieldUpdates).length === 0) {
+      fieldUpdates.Status = 'TODO'
+    } else if (!('Status' in fieldUpdates)) {
+      fieldUpdates.Status = 'TODO'
+    }
+
+    await applyProjectFieldUpdates(projectId, itemId, fieldUpdates, token)
+  } catch {
+    process.stdout.write(`⚠  Could not add to project. Issue was still created.\n`)
+  }
+}
+
+async function applyProjectFieldUpdates(
+  projectId: string,
+  itemId: string,
+  fieldUpdates: Record<string, string | number>,
+  token: string
+): Promise<void> {
+  const projectResult = (await githubGraphQL(
+    `query GetProjectFields($projectId: ID!) {
+      node(id: $projectId) {
+        ... on ProjectV2 {
+          fields(first: 50) {
+            nodes {
+              __typename
+              id
+              name
+              ... on ProjectV2SingleSelectField {
+                options { id name }
+              }
+              ... on ProjectV2IterationField {
+                configuration {
+                  iterations {
+                    id
+                    title
+                    startDate
+                  }
                 }
+              }
+              ... on ProjectV2Field {
+                dataType
               }
             }
           }
         }
-      }`,
-      { projectId },
-      token
-    )) as any
+      }
+    }`,
+    { projectId },
+    token
+  )) as any
 
-    const fields: any[] = projectResult?.data?.node?.fields?.nodes ?? []
-    const statusField = fields.find((f: any) => f.name === 'Status')
-    if (!statusField) return // No status field — skip, don't error
+  const fields: any[] = projectResult?.data?.node?.fields?.nodes ?? []
+  const fieldByName = new Map<string, any>()
+  for (const f of fields) fieldByName.set(String(f.name).toLowerCase(), f)
 
-    const todoOption = statusField.options?.find((o: any) => o.name?.toLowerCase() === 'todo')
-    if (!todoOption) return
+  const entries = Object.entries(fieldUpdates)
+  entries.sort((a, b) => {
+    const aIsStatus = a[0].toLowerCase() === 'status'
+    const bIsStatus = b[0].toLowerCase() === 'status'
+    if (aIsStatus && !bIsStatus) return -1
+    if (!aIsStatus && bIsStatus) return 1
+    return 0
+  })
 
-    // Step 3: Set status to Todo
-    await githubGraphQL(
-      `mutation SetStatus($projectId: ID!, $itemId: ID!, $fieldId: ID!, $optionId: String!) {
-        updateProjectV2ItemFieldValue(input: {
-          projectId: $projectId
-          itemId: $itemId
-          fieldId: $fieldId
-          value: { singleSelectOptionId: $optionId }
-        }) { projectV2Item { id } }
-      }`,
-      {
-        projectId,
-        itemId,
-        fieldId: statusField.id,
-        optionId: todoOption.id,
-      },
-      token
-    )
-  } catch {
-    process.stdout.write(`⚠  Could not add to project. Issue was still created.\n`)
+  for (const [name, rawValue] of entries) {
+    const field = fieldByName.get(name.toLowerCase())
+    if (!field) {
+      process.stdout.write(`⚠  Project field not found: ${name}\n`)
+      continue
+    }
+
+    let value: any = null
+
+    if (field.__typename === 'ProjectV2SingleSelectField') {
+      const option = field.options?.find(
+        (o: any) => String(o.name).toLowerCase() === String(rawValue).toLowerCase()
+      )
+      if (!option) {
+        process.stdout.write(`⚠  Option not found for ${name}: ${rawValue}\n`)
+        continue
+      }
+      value = { singleSelectOptionId: option.id }
+    } else if (field.__typename === 'ProjectV2IterationField') {
+      const iterations: any[] = field.configuration?.iterations ?? []
+      let selected: any | null = null
+      const raw = String(rawValue).toLowerCase()
+      if (raw === 'latest' || raw === 'current') {
+        selected = iterations
+          .filter((i) => i.startDate)
+          .sort((a, b) => (a.startDate > b.startDate ? -1 : 1))[0]
+      } else {
+        selected = iterations.find(
+          (i) => String(i.title).toLowerCase() === String(rawValue).toLowerCase()
+        )
+      }
+      if (!selected) {
+        process.stdout.write(`⚠  Iteration not found for ${name}: ${rawValue}\n`)
+        continue
+      }
+      value = { iterationId: selected.id }
+    } else if (field.__typename === 'ProjectV2Field') {
+      const dataType = String(field.dataType ?? '').toUpperCase()
+      if (dataType === 'NUMBER') {
+        const num = Number(rawValue)
+        if (Number.isNaN(num)) {
+          process.stdout.write(`⚠  Invalid number for ${name}: ${rawValue}\n`)
+          continue
+        }
+        value = { number: num }
+      } else if (dataType === 'DATE') {
+        value = { date: String(rawValue) }
+      } else {
+        value = { text: String(rawValue) }
+      }
+    }
+
+    if (!value) continue
+
+    try {
+      await githubGraphQL(
+        `mutation SetField($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: ProjectV2FieldValue!) {
+          updateProjectV2ItemFieldValue(input: {
+            projectId: $projectId
+            itemId: $itemId
+            fieldId: $fieldId
+            value: $value
+          }) { projectV2Item { id } }
+        }`,
+        {
+          projectId,
+          itemId,
+          fieldId: field.id,
+          value,
+        },
+        token
+      )
+    } catch {
+      process.stdout.write(`⚠  Could not set project field: ${name}\n`)
+      continue
+    }
   }
 }
 

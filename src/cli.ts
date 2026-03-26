@@ -137,6 +137,52 @@ program
     })
   )
 
+// ─── learn ────────────────────────────────────────────────────────────────────
+program
+  .command('learn <path-or-url>')
+  .description('Learn team workflow rules from a Markdown file or URL')
+  .action((source: string) =>
+    wrapAction(async () => {
+      const { runLearn } = await import('./commands/learn.js')
+      await runLearn(source)
+    })
+  )
+
+// ─── unlearn ──────────────────────────────────────────────────────────────────
+program
+  .command('unlearn')
+  .description('Remove learned workflows and revert to default behavior')
+  .option('--yes', 'Skip confirmation prompt')
+  .action((options) =>
+    wrapAction(async () => {
+      const { runUnlearn } = await import('./commands/unlearn.js')
+      await runUnlearn({ yes: options.yes })
+    })
+  )
+
+// ─── workflow ────────────────────────────────────────────────────────────────
+const workflowCmd = program.command('workflow').description('Manage learned workflows')
+
+workflowCmd
+  .command('list')
+  .description('List learned workflows')
+  .action(() =>
+    wrapAction(async () => {
+      const { runWorkflowList } = await import('./commands/workflow-list.js')
+      await runWorkflowList()
+    })
+  )
+
+workflowCmd
+  .command('view <id-or-repo>')
+  .description('View a learned workflow by ID or repo (owner/repo)')
+  .action((idOrRepo: string) =>
+    wrapAction(async () => {
+      const { runWorkflowView } = await import('./commands/workflow-view.js')
+      await runWorkflowView(idOrRepo)
+    })
+  )
+
 // ─── config ───────────────────────────────────────────────────────────────────
 const configCmd = program.command('config').description('View or edit the configuration file')
 

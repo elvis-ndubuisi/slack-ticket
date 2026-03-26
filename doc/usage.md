@@ -14,6 +14,9 @@ This guide provides detailed instructions on how to use each command and option 
   - [Arguments](#update-arguments)
   - [Options](#update-options)
 - [Command: doctor](#command-doctor)
+- [Command: learn](#command-learn)
+- [Command: unlearn](#command-unlearn)
+- [Command: workflow](#command-workflow)
 - [Config Commands](#config-commands)
   - [config view](#config-view)
   - [config edit](#config-edit)
@@ -100,6 +103,112 @@ The `doctor` command runs a comprehensive diagnostic suite to verify your enviro
   - GitHub token validity and repository permissions.
   - AI provider responsiveness.
 - **When to use**: Run this if you are getting "Authentication Failed" or "Permission Denied" errors during other commands.
+
+---
+
+<a name="command-learn"></a>
+## Command: `learn`
+
+The `learn` command teaches the CLI team-specific workflow rules from a Markdown file or URL. It saves the learned workflow locally and injects it into AI prompts for `create` and `update`.
+
+- **Usage**: `slack-ticket learn <path-or-url>`
+- **Examples**:
+  - `slack-ticket learn ./team-workflow.md`
+  - `slack-ticket learn https://github.com/org/repo/blob/main/team-workflow.md`
+
+### Markdown Format
+You can place a JSON config block at the top of the Markdown file. If omitted, the entire Markdown body is treated as instructions for the AI.
+
+````markdown
+```slack-ticket
+{
+  "name": "Team Alpha",
+  "repos": ["acme/api", "acme/web"],
+  "defaultProject": "PVT_kwDOA...",
+  "projectFields": {
+    "Status": "TODO",
+    "Iteration": "latest",
+    "Severity": "SEV 3",
+    "UPS Score": 10,
+    "Tenant": "ALL",
+    "Pod": "Fish&Chips",
+    "Priority": "P2",
+    "Size": "M",
+    "Related Feature": "Orders Sync",
+    "Recurring Bug": "Yes"
+  },
+  "projectRouting": [
+    { "pattern": "billing|invoice", "projectId": "PVT_kwDOA..." },
+    { "pattern": "auth|login", "projectId": "PVT_kwDOB..." }
+  ],
+  "labels": {
+    "keywords": {
+      "crash|exception": ["bug"],
+      "payment|billing": ["billing"]
+    },
+    "severity": {
+      "critical": ["priority:critical"]
+    },
+    "components": {
+      "payments": ["component:payments"]
+    }
+  },
+  "defaults": {
+    "severity": "medium",
+    "component": "payments",
+    "threadDepth": 4,
+    "imageHandling": true
+  },
+  "prompt": {
+    "create": "Always format Steps to Reproduce as a numbered list.",
+    "update": "Prefer concise bullet points in new_information."
+  },
+  "instructions": "Use a friendly, non-technical tone. Always include a Checklist section if possible."
+}
+```
+
+# Team Workflow Rules
+
+- If a ticket mentions refunds or chargebacks, mark it as billing-focused.
+- Always include a short customer-impact sentence in Summary.
+````
+
+### Notes
+- If `repos` is omitted, the learned workflow applies only to your configured default repo.
+- If a `repos` entry is `"*"`, the workflow applies to all repos.
+- Validation is best-effort and only warns; it never blocks learning.
+- Template: see `doc/workflow-template.md`.
+
+---
+
+<a name="command-unlearn"></a>
+## Command: `unlearn`
+
+Removes all learned workflows and returns the CLI to its default behavior.
+
+- **Usage**: `slack-ticket unlearn`
+- **Options**:
+  - `--yes`: Skip the confirmation prompt.
+
+---
+
+<a name="command-workflow"></a>
+## Command: `workflow`
+
+The `workflow` command group lets you inspect learned workflows stored locally.
+
+### `workflow list`
+Lists all learned workflows.
+
+- **Usage**: `slack-ticket workflow list`
+
+### `workflow view`
+Shows details of a learned workflow by ID or repo.
+
+- **Usage**: `slack-ticket workflow view <id-or-repo>`
+- **Examples**:
+  - `slack-ticket workflow view workflow-8f6b7c2a1e`
+  - `slack-ticket workflow view acme/api`
 
 ---
 
