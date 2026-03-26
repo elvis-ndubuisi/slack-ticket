@@ -1,6 +1,6 @@
 {
   "name": "slack-ticket",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "CLI tool to convert Slack threads into GitHub issues",
   "type": "module",
   "bin": {
@@ -44,7 +44,9 @@
     "@inquirer/prompts": "^8.3.0",
     "chalk": "^5.4.1",
     "commander": "^12.1.0",
+    "dotenv": "^8.2.0",
     "inquirer": "^12.4.2",
+    "node-fetch": "^3.3.2",
     "ora": "^8.2.0"
   },
   "devDependencies": {
