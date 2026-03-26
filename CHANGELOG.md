@@ -1,5 +1,15 @@
 # slack-ticket
 
+## 0.3.0
+
+### Minor Changes
+
+- cb56902: implement workflow support for custom flow
+
+### Patch Changes
+
+- cb56902: Document server api - slack channel support
+
 ## 0.2.1
 
 ### Patch Changes
