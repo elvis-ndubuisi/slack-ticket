@@ -3,4 +3,3 @@ node_modules/
 *.js.map
 
 .DS_Store
-config.bat
