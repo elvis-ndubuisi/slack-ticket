@@ -3,12 +3,12 @@ name: Publish to npm
 on:
   push:
     branches:
-      - main
+      - never
 
-permissions:
-  contents: write # to create release and tag
-  id-token: write # required for OIDC / Trusted Publishing
-  pull-requests: write # to create versioning PRs
+# permissions:
+#   contents: write # to create release and tag
+#   id-token: write # required for OIDC / Trusted Publishing
+#   pull-requests: write # to create versioning PRs
 
 jobs:
   publish:

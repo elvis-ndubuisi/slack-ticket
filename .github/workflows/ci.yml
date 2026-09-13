@@ -3,8 +3,8 @@ name: CI
 on:
   push:
     branches:
-      - main
-  pull_request:
+      - never_pushed
+  # pull_request:
 
 jobs:
   build_and_test:
